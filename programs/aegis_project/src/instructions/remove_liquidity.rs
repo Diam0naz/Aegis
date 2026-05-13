@@ -68,7 +68,7 @@ pub struct RemoveLiquidity<'info> {
     )]
     pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub collateral_mint: InterfaceAccount<'info, Mint>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

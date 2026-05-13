@@ -1,0 +1,22 @@
+{
+  "name": "aegis-crank-agent",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "type": "module",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.0",
+    "@solana/web3.js": "^1.95.0",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/bs58": "^4.0.4",
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}

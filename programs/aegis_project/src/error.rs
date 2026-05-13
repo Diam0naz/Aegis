@@ -114,4 +114,25 @@ pub enum AegisError {
 
     #[msg("proposal is still within the challenge window")]
     StillInChallengeWindow,
+
+    #[msg("bond amount is below the required minimum")]
+    BondTooLow,
+
+    #[msg("price feed account does not match market")]
+    InvalidPriceFeed,
+
+    #[msg("price feed is stale — data too old")]
+    StalePriceFeed,
+
+    #[msg("price feed confidence interval too wide — possible manipulation")]
+    PriceFeedUnreliable,
+
+    #[msg("this market uses event-based resolution, not price feeds")]
+    NotAPriceMarket,
+
+    #[msg("insufficient oracle votes to trigger resolution")]
+    InsufficientOracleVotes,
+
+    #[msg("oracle is not whitelisted for this market")]
+    OracleNotWhitelisted,
 }

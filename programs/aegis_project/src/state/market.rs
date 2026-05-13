@@ -89,6 +89,20 @@ pub struct Market {
 
     /// Total USDC collected in fees (for LP distribution)
     pub total_fees_collected: u64,
+
+    /// Pyth price feed account for this market (zero if event market)
+    pub price_feed: Pubkey,
+
+    /// Strike price for resolution (in Pyth's price format, scaled)
+    /// e.g. for "BTC > $100k": strike = 100_000 * 10^8
+    pub strike_price: i64,
+
+    /// Price exponent from Pyth (negative number, e.g. -8)
+    pub strike_exponent: i32,
+
+    /// Direction: true = resolve YES if price >= strike
+    ///            false = resolve YES if price < strike
+    pub price_above_strike_resolves_yes: bool,
 }
 
 impl Market {
@@ -113,5 +127,5 @@ impl Market {
     /// 8        total_fees_collected
     /// + 64     padding (future fields — never skip this)
     pub const LEN: usize =
-        8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 2 + 32 + 32 + 32 + 8 + 2 + 2 + 1 + 8 + 64;
+        8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 2 + 32 + 32 + 32 + 8 + 2 + 2 + 1 + 8 +  32 + 8 + 4 + 1 + 19;
 }

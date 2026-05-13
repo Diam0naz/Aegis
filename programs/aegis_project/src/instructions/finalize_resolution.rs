@@ -18,7 +18,7 @@ pub struct FinalizeResolution<'info> {
         ],
         bump = market.bump,
     )]
-    pub market: Account<'info, Market>,
+    pub market: Box<Account<'info, Market>>,
 
     #[account(
         mut,
@@ -26,7 +26,7 @@ pub struct FinalizeResolution<'info> {
         bump = proposal.bump,
         constraint = proposal.market == market.key() @ AegisError::Unauthorized,
     )]
-    pub proposal: Account<'info, ResolutionProposal>,
+    pub proposal: Box<Account<'info, ResolutionProposal>>,
 }
 
 pub fn finalize_resolution(ctx: Context<FinalizeResolution>) -> Result<()> {
@@ -38,10 +38,12 @@ pub fn finalize_resolution(ctx: Context<FinalizeResolution>) -> Result<()> {
     require!(!proposal.is_disputed,    AegisError::ProposalDisputed);
 
     // Challenge window must have passed
+    let challenge_end_slot = proposal.proposed_at_slot
+        .checked_add(proposal.challenge_window)
+        .ok_or(AegisError::Overflow)?;
+    
     require!(
-        clock.slot >= proposal.proposed_at_slot
-            .checked_add(proposal.challenge_window)
-            .ok_or(AegisError::Overflow)?,
+        clock.slot >= challenge_end_slot,
         AegisError::StillInChallengeWindow
     );
 

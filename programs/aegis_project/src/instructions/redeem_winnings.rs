@@ -22,12 +22,12 @@ pub struct RedeemWinnings<'info> {
         bump = market.bump,
         constraint = market.status == MarketStatus::Resolved @ AegisError::MarketNotResolved,
     )]
-    pub market: Account<'info, Market>,
+    pub market: Box<Account<'info, Market>>,
 
     /// The winning outcome token mint
     /// Verified against market.winning_outcome in handler
     #[account(mut)]
-    pub winning_mint: InterfaceAccount<'info, Mint>,
+    pub winning_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// User's winning token account — burned here
     #[account(
@@ -36,14 +36,14 @@ pub struct RedeemWinnings<'info> {
         associated_token::authority = user,
         associated_token::token_program = token_program,
     )]
-    pub user_winning_account: InterfaceAccount<'info, TokenAccount>,
+    pub user_winning_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// Market USDC vault — pays out winners
     #[account(
         mut,
         constraint = collateral_vault.key() == market.collateral_vault @ AegisError::Unauthorized,
     )]
-    pub collateral_vault: InterfaceAccount<'info, TokenAccount>,
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// User's USDC account — receives payout
     #[account(
@@ -52,9 +52,9 @@ pub struct RedeemWinnings<'info> {
         associated_token::authority = user,
         associated_token::token_program = token_program,
     )]
-    pub user_collateral_account: InterfaceAccount<'info, TokenAccount>,
+    pub user_collateral_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub collateral_mint: InterfaceAccount<'info, Mint>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

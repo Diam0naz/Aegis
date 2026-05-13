@@ -38,11 +38,11 @@ pub struct CreateMarket<'info> {
         ],
         bump,
     )]
-    pub market: Account<'info, Market>,
+    pub market: Box<Account<'info, Market>>,
 
     /// The USDC mint (or any SPL token used as collateral)
     /// InterfaceAccount supports both Token and Token-2022
-    pub collateral_mint: InterfaceAccount<'info, Mint>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// YES outcome token mint
     /// init_if_needed + seeds makes this a deterministic PDA mint
@@ -55,7 +55,7 @@ pub struct CreateMarket<'info> {
         seeds = [b"yes_mint", market.key().as_ref()],
         bump,
     )]
-    pub yes_mint: InterfaceAccount<'info, Mint>,
+    pub yes_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// NO outcome token mint
     #[account(
@@ -67,7 +67,7 @@ pub struct CreateMarket<'info> {
         seeds = [b"no_mint", market.key().as_ref()],
         bump,
     )]
-    pub no_mint: InterfaceAccount<'info, Mint>,
+    pub no_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// USDC vault — holds all collateral for this market
     /// ATA owned by the market PDA — only the program can move funds
@@ -78,7 +78,7 @@ pub struct CreateMarket<'info> {
         associated_token::authority = market,
         associated_token::token_program = token_program,
     )]
-    pub collateral_vault: InterfaceAccount<'info, TokenAccount>,
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,

@@ -8,14 +8,15 @@ pub mod state;
 pub use constants::*;
 pub use error::*;
 pub use instructions::{
-    add_liquidity, create_market, finalize_resolution, propose_resolution, redeem_winnings,
-    remove_liquidity, settle_batch, submit_order, AddLiquidity, BatchSettled, CreateMarket,
-    FinalizeResolution, LiquidityAdded, LiquidityRemoved, ProposeResolution, RedeemWinnings,
-    RemoveLiquidity, SettleBatch, SubmitOrder, *,
+    add_liquidity, check_price_resolution, create_market, finalize_resolution, propose_resolution,
+    redeem_winnings, remove_liquidity, settle_batch, submit_oracle_vote, submit_order,
+    tally_oracle_votes, AddLiquidity, CheckPriceResolution, CreateMarket, FinalizeResolution,
+    ProposeResolution, RedeemWinnings, RemoveLiquidity, SettleBatch, SubmitOracleVote, SubmitOrder,
+    TallyOracleVotes, *,
 };
 pub use state::*;
 
-declare_id!("CpTzTQ38Q4BTzC9tSC7m1Vuiqt84vvDSASK7pAgYNAYc");
+declare_id!("E7gRicDGMsBxtLd93eYT9dJkHwnAQ1EfpmgBuoUFXDsw");
 
 #[program]
 pub mod aegis_project {
@@ -54,27 +55,51 @@ pub mod aegis_project {
     pub fn settle_batch<'info>(
         ctx: Context<'_, '_, 'info, 'info, SettleBatch<'info>>,
     ) -> Result<()> {
-        // instructions::settle_batch::settle_batch(ctx)
-        crate::instructions::settle_batch(ctx)
+        crate::instructions::settle_batch::settle_batch(ctx)
     }
 
-    pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, lp_tokens_to_burn: u64) -> Result<()> {
-        crate::instructions::remove_liquidity::remove_liquidity(ctx, lp_tokens_to_burn)
+    pub fn remove_liquidity(ctx: Context<RemoveLiquidity>, lp_token_amount: u64) -> Result<()> {
+        crate::instructions::remove_liquidity::remove_liquidity(ctx, lp_token_amount)
     }
 
     pub fn propose_resolution(
         ctx: Context<ProposeResolution>,
-        outcome: bool,
+        proposed_outcome: bool,
         bond_amount: u64,
     ) -> Result<()> {
-        crate::instructions::propose_resolution::propose_resolution(ctx, outcome, bond_amount)
+        crate::instructions::propose_resolution::propose_resolution(
+            ctx,
+            proposed_outcome,
+            bond_amount,
+        )
+    }
+
+    pub fn redeem_winnings(ctx: Context<RedeemWinnings>) -> Result<()> {
+        crate::instructions::redeem_winnings::redeem_winnings(ctx)
     }
 
     pub fn finalize_resolution(ctx: Context<FinalizeResolution>) -> Result<()> {
         crate::instructions::finalize_resolution::finalize_resolution(ctx)
     }
 
-    pub fn redeem_winnings(ctx: Context<RedeemWinnings>) -> Result<()> {
-        crate::instructions::redeem_winnings::redeem_winnings(ctx)
+    pub fn check_price_resolution(
+        ctx: Context<CheckPriceResolution>,
+        bond_amount: u64,
+    ) -> Result<()> {
+        crate::instructions::check_price_resolution::check_price_resolution(ctx, bond_amount)
+    }
+
+    pub fn submit_oracle_vote(
+        ctx: Context<SubmitOracleVote>,
+        outcome: bool,
+    ) -> Result<()> {
+        crate::instructions::submit_oracle_vote::submit_oracle_vote(ctx, outcome)
+    }
+
+    pub fn tally_oracle_votes<'info>(
+        ctx: Context<'_, '_, 'info, 'info, TallyOracleVotes<'info>>,
+        bond_amount: u64,
+    ) -> Result<()> {
+        crate::instructions::tally_oracle_votes::tally_oracle_votes(ctx, bond_amount)
     }
 }

@@ -180,10 +180,13 @@ pub fn submit_order(ctx: Context<SubmitOrder>, outcome: Outcome, amount: u64) ->
 
     // ── Guard 0: ensure no open order already exists ──────────────
     let existing_order = &ctx.accounts.batch_order;
-    let has_existing_order = existing_order.market != Pubkey::default()
-        || existing_order.user != Pubkey::default();
+    let has_existing_order =
+        existing_order.market != Pubkey::default() || existing_order.user != Pubkey::default();
     if has_existing_order {
-        require!(existing_order.market == market.key(), AegisError::Unauthorized);
+        require!(
+            existing_order.market == market.key(),
+            AegisError::Unauthorized
+        );
         require!(
             existing_order.user == ctx.accounts.user.key(),
             AegisError::Unauthorized
@@ -216,43 +219,51 @@ pub fn submit_order(ctx: Context<SubmitOrder>, outcome: Outcome, amount: u64) ->
     // ── Guard 4: maximum market impact ───────────────────────────
     // Compute current price and simulated price after this order
     // If impact > threshold, order must go through commit-reveal
-    let current_price = lmsr_yes_price_bps(market.b_param, market.yes_qty, market.no_qty)?;
+    // Declare before the impact check block so they're always in scope
+    let current_price: u64;
+    let impact: u64;
 
-    let (sim_yes, sim_no) = match outcome {
-        Outcome::Yes => (
-            market
-                .yes_qty
-                .checked_add(amount)
-                .ok_or(AegisError::Overflow)?,
-            market.no_qty,
-        ),
-        Outcome::No => (
-            market.yes_qty,
-            market
-                .no_qty
-                .checked_add(amount)
-                .ok_or(AegisError::Overflow)?,
-        ),
-    };
+    let skip_impact_check = market.yes_qty == 0 && market.no_qty == 0;
 
-    let new_price = lmsr_yes_price_bps(market.b_param, sim_yes, sim_no)?;
-
-    let impact = if new_price > current_price {
-        new_price - current_price
+    if skip_impact_check {
+        // Empty market — first orders, no meaningful price yet
+        current_price = 5_000; // 50/50 default
+        impact = 0;
     } else {
-        current_price - new_price
-    };
+        current_price = lmsr_yes_price_bps(market.b_param, market.yes_qty, market.no_qty)?;
 
-    // High-impact orders cannot be submitted directly
-    // They must use commit_order → reveal_order flow
-    require!(
-        impact <= MAX_ORDER_IMPACT_BPS,
-        AegisError::OrderExceedsImpactLimit
-    );
+        let (sim_yes, sim_no) = match outcome {
+            Outcome::Yes => (
+                market
+                    .yes_qty
+                    .checked_add(amount)
+                    .ok_or(AegisError::Overflow)?,
+                market.no_qty,
+            ),
+            Outcome::No => (
+                market.yes_qty,
+                market
+                    .no_qty
+                    .checked_add(amount)
+                    .ok_or(AegisError::Overflow)?,
+            ),
+        };
 
-    // ── Transfer USDC from user → vault ───────────────────────────
-    // Funds locked immediately at submit time
-    // This prevents users cancelling after seeing batch fill direction
+        let new_price = lmsr_yes_price_bps(market.b_param, sim_yes, sim_no)?;
+
+        impact = if new_price > current_price {
+            new_price - current_price
+        } else {
+            current_price - new_price
+        };
+
+        require!(
+            impact <= MAX_ORDER_IMPACT_BPS,
+            AegisError::OrderExceedsImpactLimit
+        );
+    }
+
+    // ── Transfer USDC from user → vault ──────────────────────────────
     let transfer_ctx = CpiContext::new(
         ctx.accounts.token_program.to_account_info(),
         TransferChecked {
@@ -264,16 +275,16 @@ pub fn submit_order(ctx: Context<SubmitOrder>, outcome: Outcome, amount: u64) ->
     );
     token_interface::transfer_checked(transfer_ctx, amount, ctx.accounts.collateral_mint.decimals)?;
 
-    // ── Write BatchOrder state ─────────────────────────────────────
+    // ── Write BatchOrder state ────────────────────────────────────────
     let order = &mut ctx.accounts.batch_order;
     order.market = market.key();
     order.user = ctx.accounts.user.key();
     order.outcome = outcome.clone();
     order.amount_in = amount;
     order.batch_slot_start = market.batch_slot_start;
-    order.commitment_hash = [0u8; 32]; // not a commit-reveal order
+    order.commitment_hash = [0u8; 32];
     order.is_commit_reveal = false;
-    order.is_revealed = true; // standard orders are always "revealed"
+    order.is_revealed = true;
     order.is_filled = false;
     order.bump = ctx.bumps.batch_order;
 
@@ -283,16 +294,15 @@ pub fn submit_order(ctx: Context<SubmitOrder>, outcome: Outcome, amount: u64) ->
         outcome,
         amount,
         batch_slot_start: market.batch_slot_start,
-        price_before: current_price,
+        price_before: current_price, // now always in scope
     });
 
     msg!(
         "Order submitted: {:?} {} USDC (impact: {}bps)",
         order.outcome,
         amount,
-        impact
+        impact // now always in scope
     );
-
     Ok(())
 }
 

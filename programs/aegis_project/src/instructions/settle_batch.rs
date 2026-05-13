@@ -35,7 +35,7 @@ pub struct SettleBatch<'info> {
         ],
         bump = market.bump,
     )]
-    pub market: Account<'info, Market>,
+    pub market: Box<Account<'info, Market>>,
 
     /// LP pool — fees accrued here
     #[account(
@@ -44,7 +44,7 @@ pub struct SettleBatch<'info> {
         bump = lp_pool.bump,
         constraint = lp_pool.market == market.key(),
     )]
-    pub lp_pool: Account<'info, LpPool>,
+    pub lp_pool: Box<Account<'info, LpPool>>,
 
     /// YES token mint — program mints to filled YES orders
     #[account(
@@ -53,7 +53,7 @@ pub struct SettleBatch<'info> {
         bump,
         constraint = yes_mint.key() == market.yes_mint,
     )]
-    pub yes_mint: InterfaceAccount<'info, Mint>,
+    pub yes_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// NO token mint — program mints to filled NO orders
     #[account(
@@ -62,7 +62,7 @@ pub struct SettleBatch<'info> {
         bump,
         constraint = no_mint.key() == market.no_mint,
     )]
-    pub no_mint: InterfaceAccount<'info, Mint>,
+    pub no_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// Market's USDC vault
     #[account(
@@ -72,9 +72,9 @@ pub struct SettleBatch<'info> {
         associated_token::token_program = token_program,
         constraint = collateral_vault.key() == market.collateral_vault @ AegisError::InvalidCollateralVault,
     )]
-    pub collateral_vault: InterfaceAccount<'info, TokenAccount>,
+    pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
-    pub collateral_mint: InterfaceAccount<'info, Mint>,
+    pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -115,20 +115,24 @@ pub fn settle_batch<'info>(
         order_count <= MAX_ORDERS_PER_BATCH,
         AegisError::TooManyOrders
     );
-    let (order_infos, token_infos) = ctx.remaining_accounts.split_at(order_count);
 
     // ── Step 1: Aggregate net flow from pending orders ────────────
     let mut net_yes: u64 = 0;
     let mut net_no: u64 = 0;
-    let mut order_data: Vec<(usize, Pubkey, Outcome, u64)> = Vec::with_capacity(order_count);
+    let mut order_data: Vec<(Outcome, u64, usize)> = Vec::with_capacity(order_count);
     let mut seen_orders: Vec<Pubkey> = Vec::with_capacity(order_count);
 
     let market_key = ctx.accounts.market.key();
     let batch_slot_start = ctx.accounts.market.batch_slot_start;
 
-    for (index, order_info) in order_infos.iter().enumerate() {
-        require!(order_info.is_writable, AegisError::InvalidRemainingAccounts);
+    for i in 0..order_count {
+        let order_info = &ctx.remaining_accounts[i * 2]; // even = order PDA
+                                                         // ctx.remaining_accounts[i * 2 + 1] = token account — used in pass 2
 
+        require!(order_info.is_writable, AegisError::InvalidRemainingAccounts);
+        require!(order_info.owner == &crate::ID, AegisError::Unauthorized);
+
+        // Dedup check
         let order_key = order_info.key();
         require!(
             !seen_orders.contains(&order_key),
@@ -158,7 +162,8 @@ pub fn settle_batch<'info>(
             }
         }
 
-        order_data.push((index, order.user, order.outcome.clone(), order.amount_in));
+        // Store outcome, amount, and the index of the paired token account
+        order_data.push((order.outcome.clone(), order.amount_in, i * 2 + 1));
     }
 
     // ── Step 2: Internal netting + uniform clearing price ─────────
@@ -179,52 +184,61 @@ pub fn settle_batch<'info>(
         .checked_add(remaining_no)
         .ok_or(AegisError::Overflow)?;
 
-    let raw_clearing_price =
-        lmsr_yes_price_bps(ctx.accounts.market.b_param, new_yes_qty, new_no_qty)?;
-    let clearing_price_bps = round_to_tick(raw_clearing_price, TICK_SIZE_BPS)?;
-    let clearing_no_price_bps = 10_000u64
-        .checked_sub(clearing_price_bps)
+    let raw_price = lmsr_yes_price_bps(
+        ctx.accounts.market.b_param,
+        ctx.accounts
+            .market
+            .yes_qty
+            .checked_add(net_yes)
+            .ok_or(AegisError::Overflow)?,
+        ctx.accounts
+            .market
+            .no_qty
+            .checked_add(net_no)
+            .ok_or(AegisError::Overflow)?,
+    )?;
+    let clearing_yes_bps = round_to_tick(raw_price, TICK_SIZE_BPS)?;
+    let clearing_no_bps = 10_000u64
+        .checked_sub(clearing_yes_bps)
         .ok_or(AegisError::Overflow)?;
 
-    // ── Step 3: Mint fills + mark orders as filled ────────────────
     let fee_bps = ctx.accounts.market.fee_bps as u64;
     let authority_key = ctx.accounts.market.authority;
     let question_hash = ctx.accounts.market.question_hash;
     let bump = ctx.accounts.market.bump;
+
     let signer_seeds: &[&[&[u8]]] = &[&[
         b"market",
         authority_key.as_ref(),
         question_hash.as_ref(),
         &[bump],
     ]];
-
+    // ── Step 3: Mint fills + mark orders as filled ────────────────
     let mut total_fees: u64 = 0;
 
-    for (index, user, outcome, amount_in) in order_data.iter() {
-        let user_token_info = &token_infos[*index];
+    for (outcome, amount_in, token_idx) in order_data.iter() {
+        let user_token_info = &ctx.remaining_accounts[*token_idx]; // odd index
         require!(
             user_token_info.is_writable,
             AegisError::InvalidRemainingAccounts
         );
+
         let user_token_account: InterfaceAccount<'info, TokenAccount> =
             InterfaceAccount::try_from(user_token_info)?;
-        require!(
-            user_token_account.owner == *user,
-            AegisError::InvalidUserTokenAccount
-        );
 
-        let (mint_account, fill_price_bps, expected_mint) = match outcome {
+        let (mint_info, fill_price_bps, expected_mint) = match outcome {
             Outcome::Yes => (
                 ctx.accounts.yes_mint.to_account_info(),
-                clearing_price_bps,
+                clearing_yes_bps,
                 ctx.accounts.yes_mint.key(),
             ),
             Outcome::No => (
                 ctx.accounts.no_mint.to_account_info(),
-                clearing_no_price_bps,
+                clearing_no_bps,
                 ctx.accounts.no_mint.key(),
             ),
         };
+
         require!(
             user_token_account.mint == expected_mint,
             AegisError::InvalidOutcomeMint
@@ -235,20 +249,23 @@ pub fn settle_batch<'info>(
             .ok_or(AegisError::Overflow)?
             .checked_div(10_000)
             .ok_or(AegisError::DivisionByZero)? as u64;
+
         total_fees = total_fees.checked_add(fee).ok_or(AegisError::Overflow)?;
 
         let amount_after_fee = amount_in.checked_sub(fee).ok_or(AegisError::Overflow)?;
+
         let tokens_to_mint = (amount_after_fee as u128)
             .checked_mul(10_000)
             .ok_or(AegisError::Overflow)?
             .checked_div(fill_price_bps as u128)
             .ok_or(AegisError::DivisionByZero)? as u64;
+
         require!(tokens_to_mint > 0, AegisError::InvalidRedeemAmount);
 
         let mint_ctx: CpiContext<'_, '_, '_, 'info, MintTo<'info>> = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             MintTo {
-                mint: mint_account,
+                mint: mint_info,
                 to: user_token_info.clone(),
                 authority: ctx.accounts.market.to_account_info(),
             },
@@ -256,16 +273,22 @@ pub fn settle_batch<'info>(
         );
         token_interface::mint_to(mint_ctx, tokens_to_mint)?;
 
-        let mut order: Account<BatchOrder> = Account::try_from(&order_infos[*index])?;
-        require!(!order.is_filled, AegisError::OrderAlreadyFilled);
-        order.is_filled = true;
-
         msg!(
-            "Filling order: user={} outcome={:?} tokens={}",
-            user,
+            "Filled: outcome={:?} amount_in={} tokens={}",
             outcome,
+            amount_in,
             tokens_to_mint
         );
+    }
+
+    for i in 0..order_count {
+        let order_info = &ctx.remaining_accounts[i * 2]; // even index = order PDA
+        let mut order: Account<BatchOrder> = Account::try_from(order_info)?;
+        order.is_filled = true;
+        let mut data = order_info.try_borrow_mut_data()?;
+        let dst = &mut data[8..];
+        let serialized = order.try_to_vec()?;
+        dst[..serialized.len()].copy_from_slice(&serialized);
     }
 
     // ── Step 4: Persist market + LP pool state ────────────────────
@@ -300,7 +323,7 @@ pub fn settle_batch<'info>(
     // ── Emit ──────────────────────────────────────────────────────
     emit!(BatchSettled {
         market: ctx.accounts.market.key(),
-        clearing_price_bps,
+        clearing_price_bps: clearing_yes_bps,
         net_yes,
         net_no,
         matched,
@@ -311,7 +334,7 @@ pub fn settle_batch<'info>(
 
     msg!(
         "Batch settled: price={}bps yes={} no={} matched={} fees={}",
-        clearing_price_bps,
+        clearing_yes_bps,
         net_yes,
         net_no,
         matched,
