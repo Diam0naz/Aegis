@@ -13,21 +13,28 @@ import {
 import fs from "fs";
 import { configDotenv } from "dotenv";
 import bs58Encode from "bs58";
+import { createRequire } from "module";
 
-configDotenv();
+// Load this agent's own .env, overriding any parent .env already in the environment
+const _require = createRequire(import.meta.url);
+const _envPath = new URL("../.env", import.meta.url).pathname;
+configDotenv({ path: _envPath, override: true });
 
 // ── Config ────────────────────────────────────────────────────────
 
 const idlPath =
   process.env["IDL_PATH"] || "../../target/idl/aegis_project.json";
 const idl = JSON.parse(fs.readFileSync(idlPath, "utf8"));
-const RPC_URL = process.env["RPC_URL"] || "http://127.0.0.1:8899";;
+const RPC_URL = process.env["RPC_URL"] || "http://127.0.0.1:8899";
 const KEYPAIR_PATH =
   process.env["KEYPAIR_PATH"] ||
   `${process.env["HOME"]}/.config/solana/id.json`;
 const POLL_INTERVAL = Number(process.env["POLL_INTERVAL_MS"]) || 1000; // 1s
 const MAX_ORDERS = 50;
 const PROGRAM_ID = new PublicKey(idl.address);
+
+const rpcUrl = process.env["RPC_URL"] || "http://127.0.0.1:8899";
+const wsUrl = process.env["WS_URL"] || "ws://127.0.0.1:8900";
 
 // Market size constant — must match programs/aegis_project/src/state/market.rs::Market::LEN
 const MARKET_SIZE = 276;
@@ -61,6 +68,21 @@ function getOrderPDA(
     programId,
   )[0];
 }
+
+async function loadAllActiveMarkets(program: anchor.Program<AegisProject>) {
+  console.log("🔍 Querying ledger for active markets...");
+
+  // Dynamically pull every initialized market account from the cluster state
+  const markets = await program.account.market.all();
+
+  const marketPDAs = markets.map((m) => m.publicKey.toBase58());
+  console.log(
+    `✓ Dynamically loaded ${marketPDAs.length} market(s) straight from the chain.`,
+  );
+
+  return marketPDAs; // Feed this array directly into your watch/polling engine
+}
+
 export class CrankAgent {
   private connection: Connection;
   private program: anchor.Program;
@@ -80,7 +102,6 @@ export class CrankAgent {
     this.program = program;
     this.wallet = wallet;
   }
-
   async start() {
     this.running = true;
     console.log(`\n🔧 Aegis Crank Agent (Polling Mode)`);
@@ -90,7 +111,12 @@ export class CrankAgent {
 
     await this.waitForConnection();
 
-    // Loop indefinitely using a standard timer
+    // Load known markets from file
+    await this.loadMarketsFromFile("./markets.json");
+
+    // Note: connection.onLogs (logsSubscribe) is not supported by surfpool.
+    // Order tracking is handled via polling in runCrankCycle instead.
+
     while (this.running) {
       try {
         await this.runCrankCycle();
@@ -142,92 +168,125 @@ export class CrankAgent {
       `\nCrank Agent stopped. Settled: ${this.settled} Failed: ${this.failed}`,
     );
   }
+  // ── Known Markets Registry ─────────────────────────────────────
+  // Add market PDAs here manually, or load from a JSON file
+  // This replaces getProgramAccounts — works on any RPC free tier
 
+  private knownMarkets: Set<string> = new Set();
+
+  public async watchMarket(pubkey: PublicKey) {
+    this.knownMarkets.add(pubkey.toBase58());
+    console.log(`👁 Watching market: ${pubkey.toBase58()}`);
+  }
+
+  public async loadMarketsFromFile(path: string) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path, "utf8"));
+      for (const addr of data.markets) {
+        this.knownMarkets.add(addr);
+      }
+      console.log(`✓ Loaded ${data.markets.length} markets from ${path}`);
+    } catch {
+      console.log("  No markets file found — add markets manually");
+    }
+  }
+
+  // Replaces fetchAllActiveMarkets — fetches only known market addresses
   private async fetchAllActiveMarkets() {
-    // Offset 219 matches your MarketStatus enum position
-    const STATUS_OFFSET = 219;
-
-    const accounts = await this.connection.getProgramAccounts(
-      this.program.programId,
-      {
-        filters: [
-          { dataSize: MARKET_SIZE },
-          // "1" = base58 for 0x00 (MarketStatus::Active)
-          { memcmp: { offset: STATUS_OFFSET, bytes: "1" } },
-        ],
-      },
-    );
-
     const markets = [];
-    for (const { pubkey, account } of accounts) {
+
+    for (const pubkeyStr of this.knownMarkets) {
       try {
-        const market = this.program.coder.accounts.decode(
-          "market",
-          account.data,
-        );
+        const pubkey = new PublicKey(pubkeyStr);
+        const market = await this.program.account.market.fetch(pubkey);
+
+        // Only process Active markets
+        if (Object.keys(market.status)[0] !== "active") continue;
+
         markets.push({ pubkey, market });
       } catch {
-        continue;
+        // Market account doesn't exist or decoding failed — remove from registry
+        this.knownMarkets.delete(pubkeyStr);
       }
     }
+
     return markets;
   }
 
-  // ── Fetch pending orders for a market ─────────────────────────
+  // Replaces fetchPendingOrders — fetches order PDAs directly from events
+  // Order PDAs are deterministic: seeds = ["order", market, user]
+  // The crank agent tracks known users from OrderSubmitted events
+  private knownOrderUsers: Map<string, Set<string>> = new Map();
+  // marketPubkey → Set<userPubkey>
+
+  public trackOrderUser(marketPubkey: PublicKey, userPubkey: PublicKey) {
+    const key = marketPubkey.toBase58();
+    if (!this.knownOrderUsers.has(key)) {
+      this.knownOrderUsers.set(key, new Set());
+    }
+    this.knownOrderUsers.get(key)!.add(userPubkey.toBase58());
+  }
+
   private async fetchPendingOrders(
     marketPubkey: PublicKey,
     batchSlotStart: number,
   ) {
-    // BatchOrder layout: 8+32+32+1+8+8 = 89 bytes to batch_slot_start
-    // is_filled is at offset: 8+32+32+1+8+8+32+1+1 = 123
-    const BATCH_SLOT_OFFSET = 89;
-    const IS_FILLED_OFFSET = 123;
-
+    // Use getProgramAccounts with a memcmp filter on the market field (offset 8)
+    // batchOrder layout: discriminator(8) + market(32) + ...
     const accounts = await this.connection.getProgramAccounts(
       this.program.programId,
       {
         filters: [
-          // Filter by market pubkey at offset 8
-          {
-            memcmp: {
-              offset: 8,
-              bytes: marketPubkey.toBase58(),
-            },
-          },
-          // Filter for current batch_slot_start
-          {
-            memcmp: {
-              offset: BATCH_SLOT_OFFSET,
-              bytes: bs58Encode.encode(
-                new anchor.BN(batchSlotStart).toArrayLike(Buffer, "le", 8),
-              ),
-            },
-          },
+          { dataSize: 157 }, // BatchOrder::LEN
+          { memcmp: { offset: 8, bytes: marketPubkey.toBase58() } },
         ],
       },
     );
 
-    console.log(`Raw accounts: ${accounts.length}`);
-
-    // Decode and filter unfilled, revealed orders
     const orders = [];
     for (const { pubkey, account } of accounts) {
       try {
-        const order = this.program.coder.accounts.decode(
-          "batchOrder",
-          account.data,
-        );
-
-        // Skip filled or unrevealed orders
+        const order = await this.program.account.batchOrder.fetch(pubkey);
+        if (order.batchSlotStart.toNumber() !== batchSlotStart) continue;
         if (order.isFilled) continue;
-
         orders.push({ pubkey, order });
       } catch {
         continue;
       }
     }
+    return orders;
 
     return orders;
+  }
+
+  private async syncOrderFromTx(signature: string) {
+    try {
+      const tx = await this.connection.getTransaction(signature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (!tx) return;
+
+      // Account keys in a submit_order tx follow a known layout
+      // [user, market, batchOrder, ...]
+      const keys = tx.transaction.message.staticAccountKeys;
+      if (keys.length < 3) return;
+
+      const userPubkey: any = keys[0]; // signer = user
+      const marketPubkey: any = keys[1]; // market account
+
+      // Verify market is in our watch list
+      if (!this.knownMarkets.has(marketPubkey.toBase58())) return;
+
+      this.trackOrderUser(marketPubkey, userPubkey);
+      console.log(
+        `  📝 Tracked order: user=${userPubkey
+          .toBase58()
+          .slice(0, 8)}... market=${marketPubkey.toBase58().slice(0, 8)}...`,
+      );
+    } catch {
+      // Transaction parsing failed — skip silently
+    }
   }
 
   // ── Build remaining accounts (interleaved pairs) ───────────────
@@ -408,10 +467,15 @@ async function main() {
   const keypairData = JSON.parse(fs.readFileSync(KEYPAIR_PATH, "utf8"));
   const wallet = Keypair.fromSecretKey(Buffer.from(keypairData));
 
-  // Connect via HTTP only
-  const connection = new Connection(RPC_URL, "confirmed");
-  
+  const rpcUrl = process.env["RPC_URL"] || "http://127.0.0.1:8899";
+  const wsUrl = process.env["WS_URL"] || "ws://127.0.0.1:8900";
 
+  // Ensure the Connection object handles both HTTP and WebSocket streams natively
+  // Don't pass wsEndpoint when running against surfpool — it doesn't support logsSubscribe
+  // and the SDK will spam reconnect attempts endlessly.
+  const connection = new anchor.web3.Connection(rpcUrl, {
+    commitment: "confirmed",
+  });
   await registerIdlWithSurfpool(connection, idl, PROGRAM_ID);
 
   const provider = new anchor.AnchorProvider(
@@ -420,16 +484,27 @@ async function main() {
     { commitment: "confirmed" },
   );
   anchor.setProvider(provider);
+
   const program = new anchor.Program(idl, provider);
 
-  // No wsConnection passed anymore
   const agent = new CrankAgent(connection, program, wallet);
+
+  // Load all active markets from chain and register them
+  const chainMarkets = await loadAllActiveMarkets(program);
+  for (const addr of chainMarkets) {
+    await agent.watchMarket(new PublicKey(addr));
+  }
+
+  // Add known markets explicitly — no getProgramAccounts needed
+  // Get your market PDA from the test output or anchor keys list
+  if (process.env["WATCH_MARKET"]) {
+    await agent.watchMarket(new PublicKey(process.env["WATCH_MARKET"]));
+  }
 
   process.on("SIGINT", () => {
     agent.stop();
     process.exit(0);
   });
-
   await agent.start();
 }
 
@@ -437,5 +512,3 @@ main().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });
-
-

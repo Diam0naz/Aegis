@@ -99,7 +99,7 @@ pub fn tally_oracle_votes<'info>(
     let proposed_outcome = yes_votes >= required;
 
     // Create resolution proposal — same challenge window as manual proposals
-    let proposal = &mut ctx.accounts.proposal;
+    let proposal: &mut Account<'info, ResolutionProposal> = &mut ctx.accounts.proposal;
     proposal.market = market.key();
     proposal.proposer = ctx.accounts.caller.key();
     proposal.proposed_outcome = proposed_outcome;

@@ -2,13 +2,14 @@ import * as anchor from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { Program } from "@coral-xyz/anchor";
 import dotenv from "dotenv";
+import * as path from "path";
 import * as fs from "fs";
-import { MARKET_REGISTRY, type DataSource } from "./market-registry.js";
+import { MARKET_REGISTRY, type DataSource } from "./market-registry";
 import { resolvePythMarket } from "./resolvers/pyth";
 import { resolveSportsMarket } from "./resolvers/sports";
 import { resolveCustomMarket } from "./resolvers/custom";
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../.env"), override: true });
 
 const rpcUrl = process.env["RPC_URL"] || "http://127.0.0.1:8899";
 const oracleKeypair = process.env["ORACLE_KEYPAIR"];

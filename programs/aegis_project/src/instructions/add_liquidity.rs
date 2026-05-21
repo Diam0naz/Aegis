@@ -108,7 +108,7 @@ pub fn add_liquidity(ctx: Context<AddLiquidity>, usdc_amount: u64) -> Result<()>
     // If the pool doubled in value (fees accrued), late depositors
     // get fewer LP tokens but each is worth more — same economics.
 
-    let lp_pool = &ctx.accounts.lp_pool;
+    let lp_pool: &Box<Account<'_, LpPool>> = &ctx.accounts.lp_pool;
     if lp_pool.total_lp_supply > 0 {
         require!(lp_pool.market == ctx.accounts.market.key(), AegisError::Unauthorized);
         require!(lp_pool.lp_mint == ctx.accounts.lp_mint.key(), AegisError::Unauthorized);

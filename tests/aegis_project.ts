@@ -146,6 +146,66 @@ async function surfnetRpc(method: string, params: any) {
   return json.result;
 }
 
+/** Returns true if the RPC endpoint is a Surfpool instance */
+async function isSurfpool(endpoint?: string): Promise<boolean> {
+  const url = endpoint ?? "http://127.0.0.1:8899";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getVersion", params: [] }),
+    });
+    const json: any = await res.json();
+    return typeof json.result?.["surfnet-version"] === "string";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Patch the challenge_window field of a ResolutionProposal account to `newWindow`
+ * using surfnet_setAccount so finalize_resolution can run immediately in tests.
+ *
+ * ResolutionProposal layout (after 8-byte discriminator):
+ *   32 market | 32 proposer | 1 proposed_outcome | 8 bond_amount |
+ *   8 proposed_at_slot | 8 challenge_window | 1 is_disputed | 1 is_finalized | 1 bump | 32 padding
+ *
+ * challenge_window offset = 8 + 32 + 32 + 1 + 8 + 8 = 89
+ */
+async function patchChallengeWindow(
+  connection: anchor.web3.Connection,
+  proposalPubkey: PublicKey,
+  newWindow: bigint = 1n,
+) {
+  const endpoint = connection.rpcEndpoint;
+  const info = await connection.getAccountInfo(proposalPubkey);
+  if (!info) throw new Error("Proposal account not found");
+
+  const data = Buffer.from(info.data);
+  const offset = 89; // discriminator(8) + market(32) + proposer(32) + proposed_outcome(1) + bond_amount(8) + proposed_at_slot(8)
+  data.writeBigUInt64LE(newWindow, offset);
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 1,
+      method: "surfnet_setAccount",
+      params: [
+        proposalPubkey.toBase58(),
+        {
+          lamports: info.lamports,
+          data: data.toString("hex"),
+          owner: info.owner.toBase58(),
+          executable: false,
+        },
+      ],
+    }),
+  });
+  const json: any = await res.json();
+  if (json.error) throw new Error(`surfnet_setAccount failed: ${JSON.stringify(json.error)}`);
+}
+
 // ── Test Suite ────────────────────────────────────────────────────
 
 describe("aegis_project", () => {
@@ -939,16 +999,12 @@ describe("aegis_project", () => {
 
     it("allows resolution proposal after market is locked", async function () {
       // ── Check if Surfpool is available ──────────────────────────
-      let surfpoolAvailable = false;
-      try {
-        await surfnetRpc("surfnet_getVersion", []);
-        surfpoolAvailable = true;
-      } catch {
+      if (!(await isSurfpool(connection.rpcEndpoint))) {
         console.log("  ⚠ Surfpool not running — skipping this test");
         console.log(
           "  ⚠ Run: surfpool start && anchor test --skip-local-validator",
         );
-        this.skip(); // Mocha's built-in skip — marks as pending, not failing
+        this.skip();
         return;
       }
 
@@ -993,11 +1049,12 @@ describe("aegis_project", () => {
         .rpc();
 
       console.log(`  Warping to slot ${nearResolutionSlot + 1}...`);
-      await surfnetRpc("surfnet_pauseClock", []);
-      await surfnetRpc("surfnet_timeTravel", [
-        { absoluteSlot: nearResolutionSlot + 1 },
-      ]);
-      await surfnetRpc("surfnet_resumeClock", []);
+      // surfpool 0.9.5 has no time-travel RPC — wait for the slot naturally
+      const slotNow = await currentSlot(connection);
+      const slotsLeft = nearResolutionSlot + 1 - slotNow;
+      if (slotsLeft > 0) {
+        await new Promise((r) => setTimeout(r, slotsLeft * 400 + 1000));
+      }
 
       await program.methods
         .proposeResolution(true, new BN(100_000_000))
@@ -1572,28 +1629,14 @@ describe("aegis_project", () => {
 
     // ── Step 7: Surfpool warp + full redemption ───────────────────
     it("step 7 — warp slots and complete redemption (Surfpool)", async () => {
-      // This test demonstrates the Surfpool workflow.
-      // Run with: surfpool start && anchor test --skip-local-validator
-      // Then uncomment the warp call below.
-
-      let warped = false;
-
-      try {
-        // Warp 432,001 slots forward to skip the challenge window
-        await surfnetRpc("surfnet_timeTravel", {
-          absoluteSlot: (await currentSlot(connection)) + 432_001,
-        });
-        warped = true;
-        console.log("  ✓ Surfpool detected — warped 432,001 slots");
-      } catch {
-        console.log("  ⚠ Surfpool not running — skipping warp");
-        console.log("  ⚠ Start surfpool to run the full redemption test");
-      }
-
-      if (!warped) {
-        console.log("  ⚠ Skipping finalize + redeem — requires Surfpool");
+      if (!(await isSurfpool())) {
+        console.log("  ⚠ Surfpool not running — skipping finalize + redeem");
         return;
       }
+
+      // Patch challenge_window to 1 slot so finalize_resolution runs immediately
+      await patchChallengeWindow(connection, e2eResolution);
+      console.log("  ✓ Patched challenge_window → 1 slot via surfnet_setAccount");
 
       // Finalize resolution
       await program.methods
