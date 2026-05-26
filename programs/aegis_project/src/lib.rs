@@ -29,6 +29,7 @@ pub mod aegis_project {
         batch_window_slots: u64,
         resolution_slot: u64,
         fee_bps: u16,
+        creator_fee_bps: u16,           // ← pass through
     ) -> Result<()> {
         instructions::create_market::create_market(
             ctx,
@@ -37,6 +38,7 @@ pub mod aegis_project {
             batch_window_slots,
             resolution_slot,
             fee_bps,
+            creator_fee_bps, // ← pass through
         )
     }
 
@@ -89,10 +91,7 @@ pub mod aegis_project {
         crate::instructions::check_price_resolution::check_price_resolution(ctx, bond_amount)
     }
 
-    pub fn submit_oracle_vote(
-        ctx: Context<SubmitOracleVote>,
-        outcome: bool,
-    ) -> Result<()> {
+    pub fn submit_oracle_vote(ctx: Context<SubmitOracleVote>, outcome: bool) -> Result<()> {
         crate::instructions::submit_oracle_vote::submit_oracle_vote(ctx, outcome)
     }
 

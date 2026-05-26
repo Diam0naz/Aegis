@@ -94,10 +94,13 @@ pub fn create_market(
     batch_window_slots: u64, // slots per batch (e.g. 8)
     resolution_slot: u64,    // slot at which market locks
     fee_bps: u16,            // total fee in basis points
+    creator_fee_bps: u16,    // ← new
 ) -> Result<()> {
     let clock = Clock::get()?;
 
     // ── Validate inputs ───────────────────────────────────────────
+    // creator_fee_bps cannot exceed total fee
+    require!(creator_fee_bps <= fee_bps, AegisError::InvalidFeeBps);
     require!(
         b_param >= MIN_B_PARAM && b_param <= MAX_B_PARAM,
         AegisError::InvalidBParam
@@ -133,6 +136,8 @@ pub fn create_market(
     market.winning_outcome = None;
     market.bump = ctx.bumps.market;
     market.total_fees_collected = 0;
+    market.creator_fee_vault = ctx.accounts.authority.key();
+    market.creator_fee_bps = creator_fee_bps;
 
     // ── Emit event for off-chain indexing ─────────────────────────
     // Your frontend/indexer listens for this to know a market was created
