@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::TransferChecked;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token_interface::{self, Mint, MintTo, TokenAccount, TokenInterface},
@@ -74,6 +75,10 @@ pub struct SettleBatch<'info> {
     )]
     pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Creator's USDC token account — receives creator fee
+    #[account(mut)]
+    pub creator_fee_account: InterfaceAccount<'info, TokenAccount>,
+
     pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -81,13 +86,12 @@ pub struct SettleBatch<'info> {
 }
 
 // ── Handler ───────────────────────────────────────────────────────
-
 pub fn settle_batch<'info>(
     ctx: anchor_lang::context::Context<'_, '_, 'info, 'info, SettleBatch<'info>>,
 ) -> Result<()> {
     let clock = Clock::get()?;
 
-    // ── Guard 1: batch window must be closed ──────────────────────
+    // ── Guard 1 ───────────────────────────────────────────────────
     {
         let market = &ctx.accounts.market;
         require!(
@@ -104,8 +108,7 @@ pub fn settle_batch<'info>(
         );
     }
 
-    // ── Guard 2: remaining accounts layout + order cap ────────────
-    // Layout: first N accounts = BatchOrder PDAs, next N = destination token accounts.
+    // ── Guard 2 ───────────────────────────────────────────────────
     require!(
         ctx.remaining_accounts.len() % 2 == 0,
         AegisError::InvalidRemainingAccounts
@@ -116,7 +119,7 @@ pub fn settle_batch<'info>(
         AegisError::TooManyOrders
     );
 
-    // ── Step 1: Aggregate net flow from pending orders ────────────
+    // ── Step 1: Aggregate net flow ────────────────────────────────
     let mut net_yes: u64 = 0;
     let mut net_no: u64 = 0;
     let mut order_data: Vec<(Outcome, u64, usize)> = Vec::with_capacity(order_count);
@@ -126,13 +129,11 @@ pub fn settle_batch<'info>(
     let batch_slot_start = ctx.accounts.market.batch_slot_start;
 
     for i in 0..order_count {
-        let order_info = &ctx.remaining_accounts[i * 2]; // even = order PDA
-                                                         // ctx.remaining_accounts[i * 2 + 1] = token account — used in pass 2
+        let order_info = &ctx.remaining_accounts[i * 2];
 
         require!(order_info.is_writable, AegisError::InvalidRemainingAccounts);
         require!(order_info.owner == &crate::ID, AegisError::Unauthorized);
 
-        // Dedup check
         let order_key = order_info.key();
         require!(
             !seen_orders.contains(&order_key),
@@ -162,11 +163,10 @@ pub fn settle_batch<'info>(
             }
         }
 
-        // Store outcome, amount, and the index of the paired token account
         order_data.push((order.outcome.clone(), order.amount_in, i * 2 + 1));
     }
 
-    // ── Step 2: Internal netting + uniform clearing price ─────────
+    // ── Step 2: Netting + clearing price ──────────────────────────
     let matched = net_yes.min(net_no);
     let remaining_yes = net_yes.saturating_sub(matched);
     let remaining_no = net_no.saturating_sub(matched);
@@ -203,6 +203,7 @@ pub fn settle_batch<'info>(
         .ok_or(AegisError::Overflow)?;
 
     let fee_bps = ctx.accounts.market.fee_bps as u64;
+    let creator_fee_bps = ctx.accounts.market.creator_fee_bps as u64;
     let authority_key = ctx.accounts.market.authority;
     let question_hash = ctx.accounts.market.question_hash;
     let bump = ctx.accounts.market.bump;
@@ -213,11 +214,14 @@ pub fn settle_batch<'info>(
         question_hash.as_ref(),
         &[bump],
     ]];
-    // ── Step 3: Mint fills + mark orders as filled ────────────────
+
+    // ── Step 3: Mint fills ────────────────────────────────────────
     let mut total_fees: u64 = 0;
+    let mut total_creator_fees: u64 = 0;
+    let mut total_lp_fees: u64 = 0;
 
     for (outcome, amount_in, token_idx) in order_data.iter() {
-        let user_token_info = &ctx.remaining_accounts[*token_idx]; // odd index
+        let user_token_info = &ctx.remaining_accounts[*token_idx];
         require!(
             user_token_info.is_writable,
             AegisError::InvalidRemainingAccounts
@@ -244,15 +248,47 @@ pub fn settle_batch<'info>(
             AegisError::InvalidOutcomeMint
         );
 
-        let fee = (*amount_in as u128)
-            .checked_mul(fee_bps as u128)
+        // ── Fee split for this order ──────────────────────────────
+        // total fee = fee_bps of amount_in
+        // creator gets creator_fee_bps of amount_in (subset of total fee)
+        // remaining = total fee - creator fee → split 60/40 LP/protocol
+        let order_fee = (*amount_in as u128)
+            .checked_mul(fee_bps.into())
             .ok_or(AegisError::Overflow)?
             .checked_div(10_000)
             .ok_or(AegisError::DivisionByZero)? as u64;
 
-        total_fees = total_fees.checked_add(fee).ok_or(AegisError::Overflow)?;
+        let creator_fee = (*amount_in as u128)
+            .checked_mul(creator_fee_bps.into())
+            .ok_or(AegisError::Overflow)?
+            .checked_div(10_000)
+            .ok_or(AegisError::DivisionByZero)? as u64;
 
-        let amount_after_fee = amount_in.checked_sub(fee).ok_or(AegisError::Overflow)?;
+        // creator_fee must not exceed order_fee
+        let creator_fee = creator_fee.min(order_fee);
+
+        let remaining_fee = order_fee
+            .checked_sub(creator_fee)
+            .ok_or(AegisError::Overflow)?;
+
+        let lp_fee = remaining_fee * 6 / 10; // 60% of remaining → LPs
+        let _protocol_fee = remaining_fee - lp_fee; // 40% → protocol treasury (future)
+
+        // Accumulate totals
+        total_fees = total_fees
+            .checked_add(order_fee)
+            .ok_or(AegisError::Overflow)?;
+        total_creator_fees = total_creator_fees
+            .checked_add(creator_fee)
+            .ok_or(AegisError::Overflow)?;
+        total_lp_fees = total_lp_fees
+            .checked_add(lp_fee)
+            .ok_or(AegisError::Overflow)?;
+
+        // Amount available for token minting after total fee
+        let amount_after_fee = amount_in
+            .checked_sub(order_fee)
+            .ok_or(AegisError::Overflow)?;
 
         let tokens_to_mint = (amount_after_fee as u128)
             .checked_mul(10_000)
@@ -281,8 +317,29 @@ pub fn settle_batch<'info>(
         );
     }
 
+    // ── Step 4: Transfer creator fees in one shot (after all mints) ──
+    // Checks-Effects-Interactions: all mints done, now move USDC
+    if total_creator_fees > 0 {
+        let transfer_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            TransferChecked {
+                from: ctx.accounts.collateral_vault.to_account_info(),
+                mint: ctx.accounts.collateral_mint.to_account_info(),
+                to: ctx.accounts.creator_fee_account.to_account_info(),
+                authority: ctx.accounts.market.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token_interface::transfer_checked(
+            transfer_ctx,
+            total_creator_fees,
+            ctx.accounts.collateral_mint.decimals,
+        )?;
+    }
+
+    // ── Step 5: Mark orders as filled ────────────────────────────
     for i in 0..order_count {
-        let order_info = &ctx.remaining_accounts[i * 2]; // even index = order PDA
+        let order_info = &ctx.remaining_accounts[i * 2];
         let mut order: Account<BatchOrder> = Account::try_from(order_info)?;
         order.is_filled = true;
         let mut data = order_info.try_borrow_mut_data()?;
@@ -291,7 +348,7 @@ pub fn settle_batch<'info>(
         dst[..serialized.len()].copy_from_slice(&serialized);
     }
 
-    // ── Step 4: Persist market + LP pool state ────────────────────
+    // ── Step 6: Update market + LP pool state ─────────────────────
     let market = &mut ctx.accounts.market;
     market.yes_qty = new_yes_qty;
     market.no_qty = new_no_qty;
@@ -302,7 +359,6 @@ pub fn settle_batch<'info>(
         .checked_add(total_fees)
         .ok_or(AegisError::Overflow)?;
 
-    // ── Auto-lock market when approaching resolution slot
     if clock.slot
         >= market
             .resolution_slot
@@ -312,17 +368,16 @@ pub fn settle_batch<'info>(
         msg!("Market locked — approaching resolution slot");
     }
 
-    // ── Update LP pool ────────────────────────────────────────────
+    // LP fees accrued once — total_lp_fees already computed correctly
     let lp_pool = &mut ctx.accounts.lp_pool;
     lp_pool.cumulative_fees = lp_pool
         .cumulative_fees
-        .checked_add(total_fees)
+        .checked_add(total_lp_fees) // ← lp_fees only, not total_fees
         .ok_or(AegisError::Overflow)?;
     lp_pool.last_settled_slot = clock.slot;
 
-    // ── Emit ──────────────────────────────────────────────────────
     emit!(BatchSettled {
-        market: ctx.accounts.market.key(),
+        market: market.key(),
         clearing_price_bps: clearing_yes_bps,
         net_yes,
         net_no,
@@ -333,17 +388,17 @@ pub fn settle_batch<'info>(
     });
 
     msg!(
-        "Batch settled: price={}bps yes={} no={} matched={} fees={}",
+        "Batch settled: price={}bps yes={} no={} matched={} fees={} creator_fees={}",
         clearing_yes_bps,
         net_yes,
         net_no,
         matched,
-        total_fees
+        total_fees,
+        total_creator_fees
     );
 
     Ok(())
 }
-
 // ── Events ────────────────────────────────────────────────────────
 
 #[event]
