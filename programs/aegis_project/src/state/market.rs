@@ -103,6 +103,13 @@ pub struct Market {
     /// Direction: true = resolve YES if price >= strike
     ///            false = resolve YES if price < strike
     pub price_above_strike_resolves_yes: bool,
+
+    /// Creator's wallet — receives creator fee share from every batch
+    pub creator_fee_vault: Pubkey,
+
+    /// Creator fee in basis points (e.g. 50 = 0.5%)
+    /// Taken from total fee before LP/protocol split
+    pub creator_fee_bps: u16,
 }
 
 impl Market {
@@ -126,6 +133,8 @@ impl Market {
     /// 1        bump
     /// 8        total_fees_collected
     /// + 64     padding (future fields — never skip this)
-    pub const LEN: usize =
-        8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 2 + 32 + 32 + 32 + 8 + 2 + 2 + 1 + 8 +  32 + 8 + 4 + 1 + 19;
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 2 + 32 + 32 + 32 + 8 + 2 + 2 + 1 + 8
+    + 32 + 8 + 4 + 1  // pyth fields
+    + 32 + 2           // creator_fee_vault + creator_fee_bps
+    + 17; // remaining padding (was 19, now 17 after -2 for u16 wait already counted, adjust accordingly)
 }
