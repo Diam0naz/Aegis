@@ -2,16 +2,23 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "test": "ts-mocha ...",
+    "setup": "ts-node --transpile-only scripts/setup.ts",
+    "1:create": "ts-node --transpile-only scripts/1_create_market.ts",
+    "2:liquidity": "ts-node --transpile-only scripts/2_add_liquidity.ts",
+    "3:orders": "ts-node --transpile-only scripts/3_sumbit_orders.ts",
+    "4:settle": "ts-node --transpile-only scripts/4_settle_batch.ts",
+    "5:resolve": "ts-node --transpile-only scripts/5_resolve_market.ts",
+    "6:redeem": "ts-node --transpile-only scripts/6_finalize_and_redeem.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "^0.32.1",
-    "@coral-xyz/anchor": "^0.31.1",
+    "@coral-xyz/anchor": "^0.30.1",
     "@pythnetwork/pyth-solana-receiver": "^0.13.0",
     "@solana/spl-token": "^0.4.14",
     "dotenv": "^17.4.2"
   },
-  "type": "module",
   "devDependencies": {
     "@types/bn.js": "^5.1.0",
     "@types/chai": "^4.3.0",
