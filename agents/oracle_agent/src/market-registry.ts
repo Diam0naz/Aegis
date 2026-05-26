@@ -1,5 +1,3 @@
-// agents/oracle-agent/src/market-registry.ts
-
 export type DataSource =
   | { type: "pyth";   feedId: string;  strike: number; above: boolean }
   | { type: "sports"; league: string;  teamId: string }
@@ -25,8 +23,8 @@ export const MARKET_REGISTRY: Record<string, DataSource> = {
   // SHA-256 of "Will Solana TVL exceed Ethereum TVL by Jan 2026?"
   "c2a8f5...": {
     type:     "custom",
-    endpoint: "https://api.defillama.com/v2/chains",
-    jsonPath: "$.chains[?(@.name=='Solana')].tvl",
+    endpoint: "https://api.llama.fi/v2/chains",
+    jsonPath: "$[?(@.name=='Solana')].tvl",
     expectedValue: ">ethereum",
   },
 };
