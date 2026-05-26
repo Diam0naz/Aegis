@@ -1,0 +1,72 @@
+
+action "aegis_project_batch_settled" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "BatchSettled"
+    }
+}
+
+action "aegis_project_liquidity_added" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "LiquidityAdded"
+    }
+}
+
+action "aegis_project_liquidity_removed" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "LiquidityRemoved"
+    }
+}
+
+action "aegis_project_market_created" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "MarketCreated"
+    }
+}
+
+action "aegis_project_order_submitted" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "OrderSubmitted"
+    }
+}
+
+action "aegis_project_resolution_finalized" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "ResolutionFinalized"
+    }
+}
+
+action "aegis_project_resolution_proposed" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "ResolutionProposed"
+    }
+}
+
+action "aegis_project_winnings_redeemed" "svm::deploy_subgraph" {
+    program_id = action.deploy_aegis_project.program_id
+    program_idl = action.deploy_aegis_project.program_idl
+    block_height = 0 // action.deploy_aegis_project.block_height
+    event {
+        name = "WinningsRedeemed"
+    }
+}

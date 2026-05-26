@@ -1,0 +1,15 @@
+################################################################
+# Manage aegis_project deployment through Crypto Infrastructure as Code
+################################################################
+
+addon "svm" {
+    rpc_api_url = input.rpc_api_url
+    network_id = input.network_id
+}
+
+action "deploy_aegis_project" "svm::deploy_program" {
+    description = "Deploy aegis_project program"
+    program = svm::get_program_from_anchor_project("aegis_project") 
+    authority = signer.authority
+    payer = signer.payer
+}

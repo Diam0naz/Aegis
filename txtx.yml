@@ -1,0 +1,22 @@
+---
+name: aegis_project
+id: aegisproject
+runbooks:
+  - name: deployment
+    description: Deploy programs
+    location: runbooks/deployment
+  - name: aegis 
+    description: Register for running deployment of aegis
+    location: runbooks/deployments/aegis .tx
+environments:
+  localnet:
+      network_id: localnet
+      rpc_api_url: http://127.0.0.1:8899
+      payer_keypair_json: ~/.config/solana/id.json
+      authority_keypair_json: ~/.config/solana/id.json
+  devnet:
+      network_id: devnet
+      rpc_api_url: https://devnet.helius-rpc.com/?api-key=40ebb625-66bc-466f-a22d-dd9201b31014
+      payer_keypair_json: ~/.config/solana/id.json
+      authority_keypair_json: ~/.config/solana/id.json
+
