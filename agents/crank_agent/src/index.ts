@@ -69,23 +69,29 @@ function getOrderPDA(
   )[0];
 }
 
-async function loadAllActiveMarkets(program: anchor.Program<AegisProject>) {
-  console.log("🔍 Querying ledger for active markets...");
+async function loadAllActiveMarkets(program: anchor.Program<any>) {
+  // getProgramAccounts is proxied to mainnet by Surfpool and gets rate-limited (429).
+  // Instead, load known market addresses from the WATCH_MARKET env var or markets.json.
+  // The crank's loadMarketsFromFile() handles markets.json — this function just returns
+  // any addresses from the WATCH_MARKET env var so they get pre-registered.
+  const addresses: string[] = [];
 
-  // Dynamically pull every initialized market account from the cluster state
-  const markets = await program.account.market.all();
+  if (process.env["WATCH_MARKET"]) {
+    addresses.push(process.env["WATCH_MARKET"]);
+  }
 
-  const marketPDAs = markets.map((m) => m.publicKey.toBase58());
-  console.log(
-    `✓ Dynamically loaded ${marketPDAs.length} market(s) straight from the chain.`,
-  );
+  if (addresses.length > 0) {
+    console.log(`✓ Loaded ${addresses.length} market(s) from env.`);
+  } else {
+    console.log("  No WATCH_MARKET env var set — using markets.json only.");
+  }
 
-  return marketPDAs; // Feed this array directly into your watch/polling engine
+  return addresses;
 }
 
 export class CrankAgent {
   private connection: Connection;
-  private program: anchor.Program;
+  private program: any;
   private wallet: Keypair;
   private running: boolean = false;
   private settled: number = 0;
@@ -95,7 +101,7 @@ export class CrankAgent {
   constructor(
     connection: Connection,
     // wsConnection param removed as it is unsupported by Surfpool
-    program: anchor.Program,
+    program: any,
     wallet: Keypair,
   ) {
     this.connection = connection;
@@ -137,15 +143,34 @@ export class CrankAgent {
     const currentSlot = await this.connection.getSlot();
     const markets = await this.fetchAllActiveMarkets();
 
+    console.log(`\n⚙️  Crank cycle - Current slot: ${currentSlot}`);
+    console.log(`📊 Watching ${markets.length} active markets | Pending orders: ${this.settling.size}`);
+
+    let readyForSettlement = 0;
+    let activeMarkets = 0;
+
     for (const { pubkey, market } of markets) {
       const batchEnd =
         market.batchSlotStart.toNumber() + market.batchWindowSlots.toNumber();
+      const slotsRemaining = Math.max(0, batchEnd - currentSlot);
+      
+      const marketId = pubkey.toBase58().slice(0, 8);
+      let statusIndicator = "";
 
       // If the current slot is past the batch window, attempt settlement
       if (currentSlot >= batchEnd) {
+        statusIndicator = "🔴 [READY_FOR_SETTLEMENT]";
+        readyForSettlement++;
         await this.trySettle(pubkey, market, currentSlot);
+      } else {
+        statusIndicator = "🟢 [ACTIVE]";
+        activeMarkets++;
       }
+
+      console.log(`  ${statusIndicator} Market ${marketId}... | Batch end: ${batchEnd} | Slots remaining: ${slotsRemaining}`);
     }
+
+    console.log(`📈 Summary: ${activeMarkets} active, ${readyForSettlement} ready for settlement | Settled: ${this.settled} | Failed: ${this.failed}`);
   }
 
   private async waitForConnection() {
@@ -198,7 +223,7 @@ export class CrankAgent {
     for (const pubkeyStr of this.knownMarkets) {
       try {
         const pubkey = new PublicKey(pubkeyStr);
-        const market = await this.program.account.market.fetch(pubkey);
+        const market = await (this.program.account as any).market.fetch(pubkey);
 
         // Only process Active markets
         if (Object.keys(market.status)[0] !== "active") continue;
@@ -246,7 +271,7 @@ export class CrankAgent {
     const orders = [];
     for (const { pubkey, account } of accounts) {
       try {
-        const order = await this.program.account.batchOrder.fetch(pubkey);
+        const order = await (this.program.account as any).batchOrder.fetch(pubkey);
         if (order.batchSlotStart.toNumber() !== batchSlotStart) continue;
         if (order.isFilled) continue;
         orders.push({ pubkey, order });
@@ -341,7 +366,10 @@ export class CrankAgent {
         marketPubkey,
         market.batchSlotStart.toNumber(),
       );
-      if (orders.length === 0) return;
+      if (orders.length === 0) {
+        console.log(`  ℹ️  No pending orders for market ${key.slice(0, 8)}...`);
+        return;
+      }
 
       const ordersToSettle = orders.slice(0, MAX_ORDERS);
       const remainingAccounts = await this.buildRemainingAccounts(
@@ -350,10 +378,13 @@ export class CrankAgent {
         market.noMint,
       );
 
-      if (remainingAccounts.length === 0) return;
+      if (remainingAccounts.length === 0) {
+        console.log(`  ⚠️  No valid orders to settle for market ${key.slice(0, 8)}... (token accounts not initialized)`);
+        return;
+      }
 
       console.log(
-        `⚙ Settling ${ordersToSettle.length} orders for market ${key.slice(
+        `⚙️  Settling ${ordersToSettle.length} orders for market ${key.slice(
           0,
           8,
         )}...`,
@@ -372,6 +403,15 @@ export class CrankAgent {
         this.program.programId,
       );
 
+      const collateralMint = await this.getCollateralMint(market);
+
+      // Creator's USDC ATA — receives creator fee split during settle_batch
+      const creatorFeeAccount = getAssociatedTokenAddressSync(
+        collateralMint,
+        market.authority,
+        false,
+      );
+
       const tx = await (this.program.methods as any)
         .settleBatch()
         .accounts({
@@ -381,7 +421,8 @@ export class CrankAgent {
           yesMint: yesMintPDA,
           noMint: noMintPDA,
           collateralVault: market.collateralVault,
-          collateralMint: await this.getCollateralMint(market),
+          creatorFeeAccount,
+          collateralMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: anchor.web3.SystemProgram.programId,
@@ -394,7 +435,8 @@ export class CrankAgent {
         .rpc();
 
       this.settled++;
-      console.log(`  ✓ Settled! TX: ${tx.slice(0, 10)}...`);
+      console.log(`  ✅ Settlement successful! TX: ${tx}`);
+      console.log(`  📊 Orders settled: ${ordersToSettle.length} | Total settled: ${this.settled}`);
     } catch (err: any) {
       this.failed++;
       // Don't log expected race conditions (batch still open or already filled)
@@ -402,7 +444,11 @@ export class CrankAgent {
         !err.message.includes("BatchWindowNotClosed") &&
         !err.message.includes("OrderAlreadyFilled")
       ) {
-        console.error(`  ✗ Settle failed: ${err.message}`);
+        console.error(`  ❌ Settlement failed for market ${key.slice(0, 8)}...:`);
+        console.error(`     Error: ${err.message}`);
+        console.error(`     Total failed: ${this.failed}`);
+      } else {
+        console.log(`  ℹ️  Settlement skipped for market ${key.slice(0, 8)}... (${err.message.includes("BatchWindowNotClosed") ? "batch still open" : "orders already filled"})`);
       }
     } finally {
       this.settling.delete(key);

@@ -49,37 +49,115 @@ export class OracleAgent {
   }
 
   private async checkMarkets() {
-    // 1. Fetch all market accounts for this program
-    const markets = await (this.program.account as any)["market"].all();
+    // getProgramAccounts is proxied to mainnet by Surfpool and gets rate-limited.
+    // Instead, load known market addresses from the WATCH_MARKETS env var or
+    // a markets.json file (same approach as the crank agent).
+    const marketAddresses = this.getKnownMarketAddresses();
+
+    if (marketAddresses.length === 0) {
+      console.log(
+        "  ⚠ No markets to watch. Set WATCH_MARKETS env var or create markets.json",
+      );
+      return;
+    }
+
     const currentSlot = await this.connection.getSlot();
+    console.log(`\n🔍 Oracle check loop - Current slot: ${currentSlot}`);
 
-    for (const { publicKey, account } of markets) {
-      const status = Object.keys(account.status)[0];
+    let activeMarkets = 0;
+    let readyForResolution = 0;
 
-      // 2. Logic: Needs resolution?
-      const isPastResolution = currentSlot >= account.resolutionSlot.toNumber();
-      const isNotResolved = status !== "resolved";
+    for (const addrStr of marketAddresses) {
+      try {
+        const publicKey = new PublicKey(addrStr);
+        const account = await (this.program.account as any)["market"].fetch(
+          publicKey,
+        );
+        const status = Object.keys(account.status)[0];
+        const resolutionSlot = account.resolutionSlot.toNumber();
+        const blocksRemaining = Math.max(0, resolutionSlot - currentSlot);
 
-      if (
-        isPastResolution &&
-        isNotResolved &&
-        !this.processedMarkets.has(publicKey.toBase58())
-      ) {
-        console.log(`Market ${publicKey.toBase58()} is ready for resolution.`);
-        await this.handleResolution(account, publicKey);
+        // Log market status
+        const marketId = publicKey.toBase58().slice(0, 8);
+        let statusIndicator = "";
+        
+        if (status === "resolved") {
+          statusIndicator = "✅ [RESOLVED]";
+        } else if (currentSlot >= resolutionSlot) {
+          statusIndicator = "🔴 [READY_FOR_RESOLUTION]";
+          readyForResolution++;
+        } else {
+          statusIndicator = "🟢 [ACTIVE]";
+          activeMarkets++;
+        }
+
+        console.log(`  ${statusIndicator} Market ${marketId}... | Resolution slot: ${resolutionSlot} | Blocks remaining: ${blocksRemaining}`);
+
+        const isPastResolution = currentSlot >= resolutionSlot;
+        const isNotResolved = status !== "resolved";
+
+        if (
+          isPastResolution &&
+          isNotResolved &&
+          !this.processedMarkets.has(publicKey.toBase58())
+        ) {
+          console.log(
+            `📋 Market ${publicKey.toBase58()} is ready for resolution.`,
+          );
+          await this.handleResolution(account, publicKey);
+        }
+      } catch (err: any) {
+        console.error(`  ✗ Error checking market ${addrStr}:`, err.message);
       }
     }
+
+    console.log(`📊 Summary: ${activeMarkets} active, ${readyForResolution} ready for resolution`);
+  }
+
+  private getKnownMarketAddresses(): string[] {
+    const addresses: string[] = [];
+
+    // 1. From WATCH_MARKETS env var (comma-separated)
+    const envMarkets = process.env["WATCH_MARKETS"];
+    if (envMarkets) {
+      addresses.push(...envMarkets.split(",").map((s) => s.trim()));
+    }
+
+    // 2. From markets.json file (same format as crank agent)
+    try {
+      const marketsPath = process.env["MARKETS_FILE"] || "../crank_agent/markets.json";
+      const data = JSON.parse(fs.readFileSync(marketsPath, "utf8"));
+      if (Array.isArray(data.markets)) {
+        addresses.push(...data.markets);
+      }
+    } catch {
+      // File not found — that's fine
+    }
+
+    return [...new Set(addresses)]; // deduplicate
   }
 
   private async handleResolution(market: any, marketPubkey: PublicKey) {
     // Avoid double-processing in the same session
     this.processedMarkets.add(marketPubkey.toBase58());
 
-    const outcome = await this.determineOutcome(
-      market.questionHash,
-      marketPubkey,
-    );
-    await this.proposeResolution(marketPubkey, outcome);
+    console.log(`🎯 Resolving market ${marketPubkey.toBase58().slice(0, 8)}...`);
+    
+    try {
+      const outcome = await this.determineOutcome(
+        market.questionHash,
+        marketPubkey,
+      );
+      
+      console.log(`📊 Resolution data queried successfully`);
+      console.log(`🎲 Decided outcome: ${outcome ? "YES" : "NO"}`);
+      
+      await this.proposeResolution(marketPubkey, outcome);
+    } catch (err: any) {
+      console.error(`❌ Failed to resolve market: ${err.message}`);
+      // Remove from processed set to allow retry
+      this.processedMarkets.delete(marketPubkey.toBase58());
+    }
   }
 
   async proposeResolution(
@@ -131,6 +209,7 @@ export class OracleAgent {
     console.log(`  Finalization window open for ${marketPubkey.toBase58()}`);
   }
 
+  
   protected async determineOutcome(
     hash: number[],
     pubkey: PublicKey,
@@ -138,7 +217,21 @@ export class OracleAgent {
     // Convert hash array to hex string for registry lookup
     const hashHex = Buffer.from(hash).toString("hex");
 
-    const source = MARKET_REGISTRY[hashHex];
+    // First try exact match
+    let source = MARKET_REGISTRY[hashHex];
+    
+    // If no exact match, try prefix/truncated matching
+    if (!source) {
+      for (const [registryHash, registrySource] of Object.entries(MARKET_REGISTRY)) {
+        // Check if the registry hash is a prefix of the full hash
+        // or if the full hash starts with the registry hash (truncated match)
+        if (hashHex.startsWith(registryHash) || registryHash.endsWith("...") && hashHex.startsWith(registryHash.replace("...", ""))) {
+          source = registrySource;
+          console.log(`  🔍 Found truncated hash match: ${registryHash} -> ${hashHex.slice(0, 8)}...`);
+          break;
+        }
+      }
+    }
 
     if (!source) {
       throw new Error(
@@ -146,16 +239,19 @@ export class OracleAgent {
       );
     }
 
-    console.log(`  Resolving market: type=${source.type}`);
+    console.log(`  📡 Resolving market: type=${source.type}`);
 
     switch (source.type) {
       case "pyth":
+        console.log(`  📈 Pyth query: feedId=${source.feedId.slice(0, 8)}..., strike=${source.strike}, above=${source.above}`);
         return resolvePythMarket(source.feedId, source.strike, source.above);
 
       case "sports":
+        console.log(`  🏈 Sports query: league=${source.league}, teamId=${source.teamId}`);
         return resolveSportsMarket(source.league, source.teamId);
 
       case "custom":
+        console.log(`  🌐 Custom API query: endpoint=${source.endpoint}, path=${source.jsonPath}, expected=${source.expectedValue}`);
         return resolveCustomMarket(
           source.endpoint,
           source.jsonPath,
