@@ -8,15 +8,16 @@ pub mod state;
 pub use constants::*;
 pub use error::*;
 pub use instructions::{
-    add_liquidity, check_price_resolution, create_market, finalize_resolution, propose_resolution,
-    redeem_winnings, remove_liquidity, settle_batch, submit_oracle_vote, submit_order,
-    tally_oracle_votes, AddLiquidity, CheckPriceResolution, CreateMarket, FinalizeResolution,
-    ProposeResolution, RedeemWinnings, RemoveLiquidity, SettleBatch, SubmitOracleVote, SubmitOrder,
+    add_liquidity, check_price_resolution, create_market, finalize_resolution, pause_market,
+    propose_resolution, redeem_winnings, remove_liquidity, reveal_order, settle_batch,
+    submit_oracle_vote, submit_order, tally_oracle_votes, unpause_market, AddLiquidity,
+    CheckPriceResolution, CreateMarket, FinalizeResolution, PauseMarket, ProposeResolution,
+    RedeemWinnings, RemoveLiquidity, RevealOrder, SettleBatch, SubmitOracleVote, SubmitOrder,
     TallyOracleVotes, *,
 };
 pub use state::*;
 
-declare_id!("E7gRicDGMsBxtLd93eYT9dJkHwnAQ1EfpmgBuoUFXDsw");
+declare_id!("FsG83myaVACEpxdy96ieCpVUAGgxVT5wq3T6nQxqPm9Y");
 
 #[program]
 pub mod aegis_project {
@@ -29,7 +30,7 @@ pub mod aegis_project {
         batch_window_slots: u64,
         resolution_slot: u64,
         fee_bps: u16,
-        creator_fee_bps: u16,           // ← pass through
+        creator_fee_bps: u16, // ← pass through
     ) -> Result<()> {
         instructions::create_market::create_market(
             ctx,
@@ -50,8 +51,9 @@ pub mod aegis_project {
         ctx: Context<SubmitOrder>,
         outcome: crate::state::Outcome,
         amount: u64,
+        commitment_hash: Option<[u8; 32]>,
     ) -> Result<()> {
-        crate::instructions::submit_order::submit_order(ctx, outcome, amount)
+        crate::instructions::submit_order::submit_order(ctx, outcome, amount, commitment_hash)
     }
 
     pub fn settle_batch<'info>(
@@ -91,8 +93,12 @@ pub mod aegis_project {
         crate::instructions::check_price_resolution::check_price_resolution(ctx, bond_amount)
     }
 
-    pub fn submit_oracle_vote(ctx: Context<SubmitOracleVote>, outcome: bool) -> Result<()> {
-        crate::instructions::submit_oracle_vote::submit_oracle_vote(ctx, outcome)
+    pub fn submit_oracle_vote(
+        ctx: Context<SubmitOracleVote>,
+        outcome: bool,
+        bond_amount: u64,
+    ) -> Result<()> {
+        crate::instructions::submit_oracle_vote::submit_oracle_vote(ctx, outcome, bond_amount)
     }
 
     pub fn tally_oracle_votes<'info>(
@@ -100,5 +106,22 @@ pub mod aegis_project {
         bond_amount: u64,
     ) -> Result<()> {
         crate::instructions::tally_oracle_votes::tally_oracle_votes(ctx, bond_amount)
+    }
+
+    pub fn reveal_order(
+        ctx: Context<RevealOrder>,
+        outcome: crate::state::Outcome,
+        amount: u64,
+        nonce: [u8; 32],
+    ) -> Result<()> {
+        crate::instructions::reveal_order::reveal_order(ctx, outcome, amount, nonce)
+    }
+
+    pub fn pause_market(ctx: Context<PauseMarket>) -> Result<()> {
+        crate::instructions::pause_market::pause_market(ctx)
+    }
+
+    pub fn unpause_market(ctx: Context<PauseMarket>) -> Result<()> {
+        crate::instructions::pause_market::unpause_market(ctx)
     }
 }
