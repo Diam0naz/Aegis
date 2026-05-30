@@ -33,9 +33,6 @@ const POLL_INTERVAL = Number(process.env["POLL_INTERVAL_MS"]) || 1000; // 1s
 const MAX_ORDERS = 50;
 const PROGRAM_ID = new PublicKey(idl.address);
 
-// Market size constant — must match programs/aegis_project/src/state/market.rs::Market::LEN
-const MARKET_SIZE = 276;
-
 // ── PDA Helpers ───────────────────────────────────────────────────
 function getMarketPDA(
   authority: PublicKey,
@@ -137,6 +134,7 @@ export class CrankAgent {
    * 3. Check which markets have closed batch windows
    */
   private async runCrankCycle() {
+    await this.loadMarketsFromFile("./markets.json");
     const currentSlot = await this.connection.getSlot();
     const markets = await this.fetchAllActiveMarkets();
 
@@ -204,10 +202,14 @@ export class CrankAgent {
   public async loadMarketsFromFile(path: string) {
     try {
       const data = JSON.parse(fs.readFileSync(path, "utf8"));
+      let added = 0;
       for (const addr of data.markets) {
-        this.knownMarkets.add(addr);
+        if (!this.knownMarkets.has(addr)) {
+          this.knownMarkets.add(addr);
+          added++;
+        }
       }
-      console.log(`✓ Loaded ${data.markets.length} markets from ${path}`);
+      if (added > 0) console.log(`✓ Loaded ${added} new market(s) from ${path}`);
     } catch {
       console.log("  No markets file found — add markets manually");
     }

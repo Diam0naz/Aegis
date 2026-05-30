@@ -17,7 +17,7 @@ import {
   confirmTx,
 } from "./setup";
 
-const LIQUIDITY_AMOUNT = 10_000_000; // 10 USDC
+const LIQUIDITY_AMOUNT = 5_000_000_000_000; // 5,000,000 USDC
 
 async function main() {
   const state = loadState();

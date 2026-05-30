@@ -23,6 +23,7 @@ export class OracleAgent {
   private program: Program;
   private wallet: Keypair;
   private processedMarkets: Set<string> = new Set();
+  private evictedMarkets: Set<string> = new Set();
 
   constructor(connection: Connection, program: Program, wallet: Keypair) {
     this.connection = connection;
@@ -105,9 +106,22 @@ export class OracleAgent {
             `📋 Market ${publicKey.toBase58()} is ready for resolution.`,
           );
           await this.handleResolution(account, publicKey);
+        } else if (isPastResolution && isNotResolved && this.processedMarkets.has(publicKey.toBase58())) {
+          // Already voted — check if we can finalize
+          const [proposalPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("resolution"), publicKey.toBuffer()],
+            this.program.programId,
+          );
+          const proposalInfo = await this.connection.getAccountInfo(proposalPDA);
+          if (proposalInfo) await this.checkFinalization(publicKey, proposalPDA);
         }
       } catch (err: any) {
-        console.error(`  ✗ Error checking market ${addrStr}:`, err.message);
+        if (err.message?.includes("Account does not exist")) {
+          console.log(`  ℹ️  Market ${addrStr.slice(0, 8)}... not found on-chain — removing from watch list`);
+          this.evictedMarkets.add(addrStr);
+        } else {
+          console.error(`  ✗ Error checking market ${addrStr}:`, err.message);
+        }
       }
     }
 
@@ -123,90 +137,186 @@ export class OracleAgent {
       addresses.push(...envMarkets.split(",").map((s) => s.trim()));
     }
 
-    // 2. From markets.json file (same format as crank agent)
-    try {
-      const marketsPath = process.env["MARKETS_FILE"] || "../crank_agent/markets.json";
-      const data = JSON.parse(fs.readFileSync(marketsPath, "utf8"));
-      if (Array.isArray(data.markets)) {
-        addresses.push(...data.markets);
-      }
-    } catch {
-      // File not found — that's fine
+    // 2. From markets.json files
+    const watchFiles = [
+      process.env["MARKETS_FILE"],
+      path.join(__dirname, "../markets.json"),
+      path.join(__dirname, "../../crank_agent/markets.json"),
+    ].filter(Boolean) as string[];
+
+    for (const marketsPath of watchFiles) {
+      try {
+        const data = JSON.parse(fs.readFileSync(marketsPath, "utf8"));
+        if (Array.isArray(data.markets)) addresses.push(...data.markets);
+      } catch {}
     }
 
-    return [...new Set(addresses)]; // deduplicate
+    return [...new Set(addresses)].filter(a => !this.evictedMarkets.has(a));
   }
 
   private async handleResolution(market: any, marketPubkey: PublicKey) {
-    // Avoid double-processing in the same session
     this.processedMarkets.add(marketPubkey.toBase58());
-
     console.log(`🎯 Resolving market ${marketPubkey.toBase58().slice(0, 8)}...`);
-    
+
     try {
-      const outcome = await this.determineOutcome(
-        market.questionHash,
-        marketPubkey,
-      );
-      
-      console.log(`📊 Resolution data queried successfully`);
+      const outcome = await this.determineOutcome(market.questionHash, marketPubkey);
       console.log(`🎲 Decided outcome: ${outcome ? "YES" : "NO"}`);
-      
-      await this.proposeResolution(marketPubkey, outcome);
+      await this.submitOracleVote(marketPubkey, market, outcome);
     } catch (err: any) {
       console.error(`❌ Failed to resolve market: ${err.message}`);
-      // Remove from processed set to allow retry
       this.processedMarkets.delete(marketPubkey.toBase58());
     }
   }
 
-  async proposeResolution(
+  // Step 1: submit this oracle's vote
+  async submitOracleVote(
     marketPubkey: PublicKey,
+    market: any,
     outcome: boolean,
     bondLamports: number = DEFAULT_BOND_LAMPORTS,
   ) {
-    const [proposalPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("resolution"), marketPubkey.toBuffer()],
+    const [oracleConfigPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("oracle_config"), marketPubkey.toBuffer()],
+      this.program.programId,
+    );
+    const [oracleVotePDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("oracle_vote"), marketPubkey.toBuffer(), this.wallet.publicKey.toBuffer()],
       this.program.programId,
     );
 
-    try {
-      // Use standard getAccountInfo (HTTP) to check existence
-      const existing = await this.connection.getAccountInfo(proposalPDA);
-      if (existing) return;
+    // Skip if already voted
+    const existing = await this.connection.getAccountInfo(oracleVotePDA);
+    if (existing) {
+      console.log(`  ℹ️  Already voted for market ${marketPubkey.toBase58().slice(0, 8)}...`);
+      await this.tallyOracleVotes(marketPubkey, market);
+      return;
+    }
 
+    try {
       const tx = await (this.program.methods as any)
-        .proposeResolution(outcome, new anchor.BN(bondLamports))
+        .submitOracleVote(outcome, new anchor.BN(bondLamports))
         .accounts({
-          proposer: this.wallet.publicKey,
+          oracle: this.wallet.publicKey,
           market: marketPubkey,
-          proposal: proposalPDA,
+          oracleConfig: oracleConfigPDA,
+          oracleVote: oracleVotePDA,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .signers([this.wallet])
         .rpc();
 
-      console.log(`✓ Resolution proposed: ${tx.slice(0, 8)}...`);
-
-      // For local testing on Surfnet, we don't wait 48h.
-      // We just log it. You can manually warp slots via RPC if needed.
-      this.scheduleFinalization(marketPubkey, proposalPDA);
+      console.log(`✓ Oracle vote submitted: ${tx.slice(0, 8)}... outcome=${outcome}`);
+      await this.tallyOracleVotes(marketPubkey, market);
     } catch (err: any) {
-      this.processedMarkets.delete(marketPubkey.toBase58()); // Allow retry on failure
-      console.error(
-        `✗ Propose failed for ${marketPubkey.toBase58()}:`,
-        err.message,
-      );
+      this.processedMarkets.delete(marketPubkey.toBase58());
+      console.error(`✗ submitOracleVote failed: ${err.message}`);
     }
   }
 
-  private scheduleFinalization(
-    marketPubkey: PublicKey,
-    proposalPDA: PublicKey,
-  ) {
-    // Note: In a real polling agent, you'd store this in a DB and
-    // poll for "Ready to Finalize" status instead of using setTimeout.
-    console.log(`  Finalization window open for ${marketPubkey.toBase58()}`);
+  // Step 2: tally all oracle votes → creates ResolutionProposal
+  async tallyOracleVotes(marketPubkey: PublicKey, market: any) {
+    const [oracleConfigPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("oracle_config"), marketPubkey.toBuffer()],
+      this.program.programId,
+    );
+    const [proposalPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("resolution"), marketPubkey.toBuffer()],
+      this.program.programId,
+    );
+
+    // Skip if proposal already exists
+    const existing = await this.connection.getAccountInfo(proposalPDA);
+    if (existing) {
+      console.log(`  ℹ️  Proposal already exists — checking finalization`);
+      await this.checkFinalization(marketPubkey, proposalPDA);
+      return;
+    }
+
+    // Fetch oracle config to know which oracles to include
+    let oracleConfig: any;
+    try {
+      oracleConfig = await (this.program.account as any).oracleConfig.fetch(oracleConfigPDA);
+    } catch {
+      console.error(`  ✗ OracleConfig not found for market ${marketPubkey.toBase58().slice(0, 8)}...`);
+      return;
+    }
+
+    // Build remaining_accounts: all OracleVote PDAs for this market
+    const remainingAccounts = [];
+    for (let i = 0; i < oracleConfig.oracleCount; i++) {
+      const oracle = oracleConfig.oracles[i];
+      const [votePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("oracle_vote"), marketPubkey.toBuffer(), oracle.toBuffer()],
+        this.program.programId,
+      );
+      const voteInfo = await this.connection.getAccountInfo(votePDA);
+      if (voteInfo) {
+        remainingAccounts.push({ pubkey: votePDA, isSigner: false, isWritable: true });
+      }
+    }
+
+    if (remainingAccounts.length === 0) {
+      console.log(`  ⚠️  No oracle votes found yet for market ${marketPubkey.toBase58().slice(0, 8)}...`);
+      return;
+    }
+
+    try {
+      const tx = await (this.program.methods as any)
+        .tallyOracleVotes(new anchor.BN(DEFAULT_BOND_LAMPORTS))
+        .accounts({
+          caller: this.wallet.publicKey,
+          market: marketPubkey,
+          oracleConfig: oracleConfigPDA,
+          proposal: proposalPDA,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .remainingAccounts(remainingAccounts)
+        .signers([this.wallet])
+        .rpc();
+
+      console.log(`✓ Oracle votes tallied: ${tx.slice(0, 8)}...`);
+      await this.checkFinalization(marketPubkey, proposalPDA);
+    } catch (err: any) {
+      console.error(`✗ tallyOracleVotes failed: ${err.message}`);
+    }
+  }
+
+  // Step 3: finalize after challenge window (432,000 slots ≈ 2 days)
+  async checkFinalization(marketPubkey: PublicKey, proposalPDA: PublicKey) {
+    try {
+      const proposal = await (this.program.account as any).resolutionProposal.fetch(proposalPDA);
+      if (proposal.isFinalized) {
+        console.log(`  ✅ Market ${marketPubkey.toBase58().slice(0, 8)}... already finalized`);
+        return;
+      }
+      if (proposal.isDisputed) {
+        console.log(`  ⚠️  Market ${marketPubkey.toBase58().slice(0, 8)}... proposal is disputed`);
+        return;
+      }
+
+      const currentSlot = await this.connection.getSlot();
+      const challengeEndSlot = proposal.proposedAtSlot.toNumber() + proposal.challengeWindow.toNumber();
+
+      if (currentSlot < challengeEndSlot) {
+        const slotsLeft = challengeEndSlot - currentSlot;
+        console.log(`  ⏳ Challenge window open for ${marketPubkey.toBase58().slice(0, 8)}... (${slotsLeft} slots remaining)`);
+        return;
+      }
+
+      const tx = await (this.program.methods as any)
+        .finalizeResolution()
+        .accounts({
+          caller: this.wallet.publicKey,
+          market: marketPubkey,
+          proposal: proposalPDA,
+        })
+        .signers([this.wallet])
+        .rpc();
+
+      console.log(`✅ Resolution finalized: ${tx.slice(0, 8)}...`);
+    } catch (err: any) {
+      console.error(`✗ checkFinalization failed: ${err.message}`);
+    }
   }
 
   

@@ -9,4 +9,5 @@ test-ledger
 ./agents/crank_agent/.env
 ./agents/oracle_agent/.env
 .env
-file.ts
+file.ts.logs/
+.runbook-logs/

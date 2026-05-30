@@ -17,7 +17,7 @@ export const WALLET_PATH =
   `${process.env.HOME}/.config/solana/devnet-wallet.json`;
 
 export const PROGRAM_ID = new PublicKey(
-  "E7gRicDGMsBxtLd93eYT9dJkHwnAQ1EfpmgBuoUFXDsw"
+  "FsG83myaVACEpxdy96ieCpVUAGgxVT5wq3T6nQxqPm9Y"
 );
 
 export const IDL_PATH = path.join(
@@ -39,7 +39,6 @@ export function loadProgram(wallet: Keypair): {
   const connection = new Connection(RPC_URL, {
     commitment: "confirmed",
     confirmTransactionInitialTimeout: 120000,
-    wsEndpoint: "wss://devnet.helius-rpc.com/?api-key=40ebb625-66bc-466f-a22d-dd9201b31014",
   });
   const provider = new anchor.AnchorProvider(
     connection,
@@ -147,6 +146,23 @@ export function saveState(state: Record<string, any>) {
     STATE_FILE,
     JSON.stringify({ ...existing, ...state }, null, 2)
   );
+}
+
+// Appends a market PDA to the agents' markets.json watch files
+export function registerMarketWithAgents(marketPDA: string) {
+  const watchFiles = [
+    path.join(__dirname, "../agents/crank_agent/markets.json"),
+    path.join(__dirname, "../agents/oracle_agent/markets.json"),
+  ];
+  for (const file of watchFiles) {
+    let data: { markets: string[] } = { markets: [] };
+    try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+    if (!data.markets.includes(marketPDA)) {
+      data.markets.push(marketPDA);
+      fs.writeFileSync(file, JSON.stringify(data, null, 2));
+      console.log(`  📋 Registered in ${path.basename(path.dirname(file))}/markets.json`);
+    }
+  }
 }
 
 export function loadState(): Record<string, any> {

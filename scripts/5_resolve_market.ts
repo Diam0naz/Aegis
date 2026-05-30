@@ -32,12 +32,18 @@ async function main() {
   const slotsRemaining = market.resolutionSlot.toNumber() - currentSlot;
 
   if (slotsRemaining > 0) {
-    const waitMs = slotsRemaining * 400 + 2000;
     console.log(`Resolution slot: ${market.resolutionSlot.toNumber()}`);
     console.log(`Current slot:    ${currentSlot}`);
     console.log(`Slots remaining: ${slotsRemaining}`);
-    console.log(`Waiting ${Math.ceil(waitMs / 1000)}s...`);
-    await sleep(waitMs);
+    console.log(`Polling until resolution slot...`);
+    const target = market.resolutionSlot.toNumber();
+    let last = currentSlot;
+    while (true) {
+      await sleep(2000);
+      const slot = await connection.getSlot();
+      if (slot !== last) { process.stdout.write(`\r  Slot: ${slot} / ${target} (${Math.max(0, target - slot)} remaining)  `); last = slot; }
+      if (slot >= target) { console.log("\n✓ Resolution slot reached"); break; }
+    }
   }
 
   // Bond is paid in SOL lamports — minimum 0.001 SOL

@@ -1,0 +1,26 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MARKET_REGISTRY = void 0;
+// Maps question hash (hex) → data source config
+exports.MARKET_REGISTRY = {
+    // SHA-256 of "Will BTC hit $200k by end of 2025?"
+    "a3f2c1...": {
+        type: "pyth",
+        feedId: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+        strike: 200_000,
+        above: true,
+    },
+    // SHA-256 of "Will the Lagos Eagles win the 2025 cup?"
+    "b7d9e4...": {
+        type: "sports",
+        league: "nfl",
+        teamId: "lagos-eagles",
+    },
+    // SHA-256 of "Will Solana TVL exceed Ethereum TVL by Jan 2026?"
+    "c2a8f5...": {
+        type: "custom",
+        endpoint: "https://api.llama.fi/v2/chains",
+        jsonPath: "$[?(@.name=='Solana')].tvl",
+        expectedValue: ">ethereum",
+    },
+};
