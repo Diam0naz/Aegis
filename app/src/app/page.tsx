@@ -2,102 +2,305 @@
 
 import { useState, useMemo } from "react";
 import MarketCard from "@/components/MarketCard";
-import { MOCK_MARKETS } from "@/lib/mockData";
+import { MOCK_MARKETS, MockMarket } from "@/lib/mockData";
 import { formatUsdc } from "@/lib/utils";
-import type { MarketStatus, Category } from "@/lib/mockData";
+import MultiLineChart from "@/components/MultiLineChart";
 
-const FILTERS: { label: string; value: string }[] = [
-  { label: "All", value: "all" },
-  { label: "Active", value: "active" },
-  { label: "Locked", value: "locked" },
-  { label: "Resolved", value: "resolved" },
-  { label: "Crypto", value: "crypto" },
-  { label: "Macro", value: "macro" },
-  { label: "Sports", value: "sports" },
+const CATEGORIES = [
+  { label: "All Markets", value: "all" },
+  { label: "Trending", value: "trending" },
+  { label: "Crypto 🪙", value: "crypto" },
+  { label: "Politics 🏛️", value: "politics" },
+  { label: "Sports 🏆", value: "sports" },
+  { label: "Tech 💻", value: "tech" },
+  { label: "Economics 📊", value: "economics" },
 ];
 
 export default function HomePage() {
   const [filter, setFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const filtered = useMemo(() => {
-    if (filter === "all") return MOCK_MARKETS;
-    return MOCK_MARKETS.filter(
-      (m) => m.status === filter || m.category === filter
-    );
-  }, [filter]);
+  const featuredMarket = useMemo(() => {
+    return MOCK_MARKETS.find((m) => m.isFeatured) || MOCK_MARKETS[0];
+  }, []);
 
-  // Hero stats
-  const totalVolume = MOCK_MARKETS.reduce((s, m) => s + m.volume, 0);
-  const totalLiquidity = MOCK_MARKETS.reduce((s, m) => s + m.liquidity, 0);
-  const activeCount = MOCK_MARKETS.filter((m) => m.status === "active").length;
+  const filteredMarkets = useMemo(() => {
+    let result = MOCK_MARKETS.filter((m) => !m.isFeatured); // Don't show featured market twice
+
+    if (filter !== "all") {
+      if (filter === "trending") {
+        result = result.filter((m) => m.volume24h > 50000 || m.isLive);
+      } else {
+        result = result.filter((m) => m.category === filter);
+      }
+    }
+
+    if (searchQuery.trim() !== "") {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (m) =>
+          m.question.toLowerCase().includes(q) ||
+          m.category.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  }, [filter, searchQuery]);
 
   return (
     <div className="page-content">
-      {/* ── Hero ────────────────────────────────────────── */}
-      <section className="hero" aria-label="Aegis Protocol overview">
-        <div className="hero-eyebrow">
-          <span>⬡</span> Built on Solana
+      {/* Search Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "16px",
+          marginBottom: "24px",
+          borderBottom: "1px solid var(--border)",
+          paddingBottom: "16px",
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: "20px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "-0.5px" }}>
+            AEGIS Terminal
+          </h1>
+          <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+            Decentralized Batch-Settled Prediction Infrastructure
+          </p>
         </div>
-        <h1>Predict the Future,<br />Earn on Truth</h1>
-        <p className="hero-sub">
-          Trade binary prediction markets secured by LMSR pricing, batch
-          settlement, and a decentralized oracle network.
-        </p>
-        <div className="hero-stats" role="list" aria-label="Protocol statistics">
-          <div className="hero-stat" role="listitem">
-            <div className="hero-stat-value" style={{ color: "var(--primary)" }}>
-              {formatUsdc(totalVolume)}
-            </div>
-            <div className="hero-stat-label">Total Volume</div>
-          </div>
-          <div className="hero-stat" role="listitem">
-            <div className="hero-stat-value" style={{ color: "var(--yes)" }}>
-              {activeCount}
-            </div>
-            <div className="hero-stat-label">Open Markets</div>
-          </div>
-          <div className="hero-stat" role="listitem">
-            <div className="hero-stat-value" style={{ color: "#38bdf8" }}>
-              {formatUsdc(totalLiquidity)}
-            </div>
-            <div className="hero-stat-label">Total Liquidity</div>
-          </div>
-        </div>
-      </section>
 
-      {/* ── Markets Grid ─────────────────────────────────── */}
-      <section className="markets-section" aria-label="Prediction markets">
-        <div className="section-header">
-          <h2 className="section-title">Markets</h2>
-          <nav className="filter-bar" aria-label="Filter markets">
-            {FILTERS.map(({ label, value }) => (
+        <div className="search-bar-container">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            placeholder="Search prediction markets..."
+            className="search-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="landing-grid">
+        {/* Left Column: Featured & Grid */}
+        <div>
+          {/* Featured Market Section */}
+          {featuredMarket && (
+            <div className="featured-card">
+              <span className="featured-badge">Featured Market</span>
+              <h2 className="featured-question">{featuredMarket.question}</h2>
+
+              {/* Multi-outcome Timeline Picker */}
+              <div className="multi-outcome-timeline">
+                {featuredMarket.outcomes?.map((out) => (
+                  <div key={out.id} className="timeline-node active">
+                    <div className="timeline-label">{out.name}</div>
+                    <div className="timeline-val font-mono" style={{ color: "var(--primary)" }}>
+                      {out.price}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Multi-line Interactive Chart */}
+              <div style={{ background: "rgba(0,0,0,0.2)", padding: "16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.03)" }}>
+                <MultiLineChart outcomes={featuredMarket.outcomes || []} />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "16px", color: "var(--text-muted)" }}>
+                <span className="font-mono">Liquidity: ${formatUsdc(featuredMarket.liquidity)} USDC</span>
+                <span>Oracle Resolver: {featuredMarket.resolutionSource}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Filter Pills */}
+          <div className="category-pills">
+            {CATEGORIES.map((cat) => (
               <button
-                key={value}
-                id={`filter-${value}`}
-                className={`filter-btn ${filter === value ? "active" : ""}`}
-                onClick={() => setFilter(value)}
-                aria-pressed={filter === value}
+                key={cat.value}
+                className={`category-pill ${filter === cat.value ? "active" : ""}`}
+                onClick={() => setFilter(cat.value)}
               >
-                {label}
+                {cat.label}
               </button>
             ))}
-          </nav>
+          </div>
+
+          {/* Markets Grid */}
+          <div className="market-cards-grid">
+            {filteredMarkets.length > 0 ? (
+              filteredMarkets.map((market) => (
+                <MarketCard
+                  key={market.id}
+                  market={market}
+                  variant={market.isSportsMatchup ? "sports" : "polymarket"}
+                />
+              ))
+            ) : (
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  textAlign: "center",
+                  padding: "60px 20px",
+                  background: "var(--surface)",
+                  borderRadius: "12px",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                <div style={{ fontSize: "32px", marginBottom: "12px" }}>🔮</div>
+                <div style={{ fontWeight: "700", color: "#fff", marginBottom: "4px" }}>No markets found</div>
+                <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Try searching or selecting another category</div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {filtered.length === 0 ? (
-          <div className="empty-state" role="status">
-            <div className="empty-state-icon">◎</div>
-            <div className="empty-state-title">No markets found</div>
-            <div className="empty-state-sub">Try a different filter</div>
+        {/* Right Column: Sidebars */}
+        <div>
+          {/* Breaking News / Trending markets */}
+          <div className="sidebar-panel">
+            <h3 className="sidebar-title">
+              <span>Breaking Markets</span>
+              <span className="font-mono" style={{ fontSize: "10px", color: "var(--text-subtle)" }}>LIVE FEED</span>
+            </h3>
+            <div className="sidebar-list">
+              <div className="sidebar-item">
+                <div className="sidebar-item-left">
+                  <span className="sidebar-num">1</span>
+                  <div>
+                    <div className="sidebar-item-title">GPT-5 Release Date</div>
+                    <div className="sidebar-item-sub font-mono">Vol: $112K · Tech</div>
+                  </div>
+                </div>
+                <div className="sidebar-item-right font-mono">
+                  <div style={{ fontWeight: "700" }}>73%</div>
+                  <span className="change-indicator up">▲ 5.4%</span>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div className="sidebar-item-left">
+                  <span className="sidebar-num">2</span>
+                  <div>
+                    <div className="sidebar-item-title">Celtics vs Mavericks</div>
+                    <div className="sidebar-item-sub font-mono">Vol: $87K · Sports</div>
+                  </div>
+                </div>
+                <div className="sidebar-item-right font-mono">
+                  <div style={{ fontWeight: "700" }}>78%</div>
+                  <span className="change-indicator up">▲ 12.1%</span>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div className="sidebar-item-left">
+                  <span className="sidebar-num">3</span>
+                  <div>
+                    <div className="sidebar-item-title">US Stablecoin Bill</div>
+                    <div className="sidebar-item-sub font-mono">Vol: $31K · Politics</div>
+                  </div>
+                </div>
+                <div className="sidebar-item-right font-mono">
+                  <div style={{ fontWeight: "700" }}>58%</div>
+                  <span className="change-indicator down">▼ 2.3%</span>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div className="sidebar-item-left">
+                  <span className="sidebar-num">4</span>
+                  <div>
+                    <div className="sidebar-item-title">Solana Flip Ethereum</div>
+                    <div className="sidebar-item-sub font-mono">Vol: $62K · Crypto</div>
+                  </div>
+                </div>
+                <div className="sidebar-item-right font-mono">
+                  <div style={{ fontWeight: "700" }}>31%</div>
+                  <span className="change-indicator up">▲ 4.1%</span>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div className="sidebar-item-left">
+                  <span className="sidebar-num">5</span>
+                  <div>
+                    <div className="sidebar-item-title">Fed Cut Rates</div>
+                    <div className="sidebar-item-sub font-mono">Vol: $94K · Macro</div>
+                  </div>
+                </div>
+                <div className="sidebar-item-right font-mono">
+                  <div style={{ fontWeight: "700" }}>65%</div>
+                  <span className="change-indicator down">▼ 0.8%</span>
+                </div>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="markets-grid">
-            {filtered.map((market) => (
-              <MarketCard key={market.id} market={market} />
-            ))}
+
+          {/* Hot Topics Sidebar */}
+          <div className="sidebar-panel">
+            <h3 className="sidebar-title">
+              <span>Hot Categories</span>
+              <span>🔥</span>
+            </h3>
+            <div className="sidebar-list">
+              <div className="sidebar-item">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "16px" }}>🪙</span>
+                  <div>
+                    <div style={{ fontWeight: "700" }}>Crypto</div>
+                    <div className="sidebar-item-sub font-mono">Daily Vol: $3.25M</div>
+                  </div>
+                </div>
+                <span className="logo-badge" style={{ fontSize: "9px" }}>HOT</span>
+              </div>
+
+              <div className="sidebar-item">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "16px" }}>💻</span>
+                  <div>
+                    <div style={{ fontWeight: "700" }}>Tech / AI</div>
+                    <div className="sidebar-item-sub font-mono">Daily Vol: $1.82M</div>
+                  </div>
+                </div>
+                <span className="logo-badge" style={{ fontSize: "9px" }}>HOT</span>
+              </div>
+
+              <div className="sidebar-item">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "16px" }}>🏆</span>
+                  <div>
+                    <div style={{ fontWeight: "700" }}>Sports</div>
+                    <div className="sidebar-item-sub font-mono">Daily Vol: $950K</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "16px" }}>🏛️</span>
+                  <div>
+                    <div style={{ fontWeight: "700" }}>Politics</div>
+                    <div className="sidebar-item-sub font-mono">Daily Vol: $780K</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sidebar-item">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "16px" }}>📊</span>
+                  <div>
+                    <div style={{ fontWeight: "700" }}>Economics</div>
+                    <div className="sidebar-item-sub font-mono">Daily Vol: $540K</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
-      </section>
+        </div>
+      </div>
     </div>
   );
 }
