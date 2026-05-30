@@ -33,9 +33,6 @@ const POLL_INTERVAL = Number(process.env["POLL_INTERVAL_MS"]) || 1000; // 1s
 const MAX_ORDERS = 50;
 const PROGRAM_ID = new PublicKey(idl.address);
 
-const rpcUrl = process.env["RPC_URL"] || "http://127.0.0.1:8899";
-const wsUrl = process.env["WS_URL"] || "ws://127.0.0.1:8900";
-
 // Market size constant — must match programs/aegis_project/src/state/market.rs::Market::LEN
 const MARKET_SIZE = 276;
 
@@ -280,8 +277,6 @@ export class CrankAgent {
       }
     }
     return orders;
-
-    return orders;
   }
 
   private async syncOrderFromTx(signature: string) {
@@ -412,6 +407,13 @@ export class CrankAgent {
         false,
       );
 
+      // Cranker's USDC ATA — receives crank tip
+      const crankerCollateralAccount = getAssociatedTokenAddressSync(
+        collateralMint,
+        this.wallet.publicKey,
+        false,
+      );
+
       const tx = await (this.program.methods as any)
         .settleBatch()
         .accounts({
@@ -421,6 +423,7 @@ export class CrankAgent {
           yesMint: yesMintPDA,
           noMint: noMintPDA,
           collateralVault: market.collateralVault,
+          crankerCollateralAccount,
           creatorFeeAccount,
           collateralMint,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -513,13 +516,10 @@ async function main() {
   const keypairData = JSON.parse(fs.readFileSync(KEYPAIR_PATH, "utf8"));
   const wallet = Keypair.fromSecretKey(Buffer.from(keypairData));
 
-  const rpcUrl = process.env["RPC_URL"] || "http://127.0.0.1:8899";
-  const wsUrl = process.env["WS_URL"] || "ws://127.0.0.1:8900";
-
   // Ensure the Connection object handles both HTTP and WebSocket streams natively
   // Don't pass wsEndpoint when running against surfpool — it doesn't support logsSubscribe
   // and the SDK will spam reconnect attempts endlessly.
-  const connection = new anchor.web3.Connection(rpcUrl, {
+  const connection = new anchor.web3.Connection(RPC_URL, {
     commitment: "confirmed",
   });
   await registerIdlWithSurfpool(connection, idl, PROGRAM_ID);
