@@ -2,7 +2,8 @@ import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { IDL, PROGRAM_ID } from "./idl";
 
-const coder = new BorshCoder(IDL);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const coder = new BorshCoder(IDL as any);
 const parser = new EventParser(new PublicKey(PROGRAM_ID), coder);
 
 export type AegisEvent =

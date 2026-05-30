@@ -9,8 +9,11 @@ import {
   oracleVotePda,
 } from "./pda";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const acct = (program: AegisProgram) => (program.account as any);
+
 export async function fetchMarket(program: AegisProgram, address: PublicKey) {
-  return program.account.market.fetch(address);
+  return acct(program).market.fetch(address);
 }
 
 export async function fetchMarketBySeeds(
@@ -19,16 +22,16 @@ export async function fetchMarketBySeeds(
   questionHash: Uint8Array,
 ) {
   const [pda] = marketPda(authority, questionHash);
-  return program.account.market.fetch(pda);
+  return acct(program).market.fetch(pda);
 }
 
 export async function fetchAllMarkets(program: AegisProgram) {
-  return program.account.market.all();
+  return acct(program).market.all();
 }
 
 export async function fetchLpPool(program: AegisProgram, market: PublicKey) {
   const [pda] = lpPoolPda(market);
-  return program.account.lpPool.fetch(pda);
+  return acct(program).lpPool.fetch(pda);
 }
 
 export async function fetchBatchOrder(
@@ -37,21 +40,21 @@ export async function fetchBatchOrder(
   user: PublicKey,
 ) {
   const [pda] = batchOrderPda(market, user);
-  return program.account.batchOrder.fetch(pda);
+  return acct(program).batchOrder.fetch(pda);
 }
 
 export async function fetchBatchOrderByAddress(
   program: AegisProgram,
   address: PublicKey,
 ) {
-  return program.account.batchOrder.fetch(address);
+  return acct(program).batchOrder.fetch(address);
 }
 
 export async function fetchOpenOrdersForMarket(
   program: AegisProgram,
   market: PublicKey,
 ) {
-  return program.account.batchOrder.all([
+  return acct(program).batchOrder.all([
     { memcmp: { offset: 8, bytes: market.toBase58() } },
   ]);
 }
@@ -61,7 +64,7 @@ export async function fetchResolutionProposal(
   market: PublicKey,
 ) {
   const [pda] = resolutionPda(market);
-  return program.account.resolutionProposal.fetch(pda);
+  return acct(program).resolutionProposal.fetch(pda);
 }
 
 export async function fetchOracleConfig(
@@ -69,7 +72,7 @@ export async function fetchOracleConfig(
   market: PublicKey,
 ) {
   const [pda] = oracleConfigPda(market);
-  return program.account.oracleConfig.fetch(pda);
+  return acct(program).oracleConfig.fetch(pda);
 }
 
 export async function fetchOracleVote(
@@ -78,5 +81,5 @@ export async function fetchOracleVote(
   oracle: PublicKey,
 ) {
   const [pda] = oracleVotePda(market, oracle);
-  return program.account.oracleVote.fetch(pda);
+  return acct(program).oracleVote.fetch(pda);
 }

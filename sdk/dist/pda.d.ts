@@ -1,0 +1,10 @@
+import { PublicKey } from "@solana/web3.js";
+export declare function marketPda(authority: PublicKey, questionHash: Uint8Array): [PublicKey, number];
+export declare function lpPoolPda(market: PublicKey): [PublicKey, number];
+export declare function lpMintPda(market: PublicKey): [PublicKey, number];
+export declare function yesMintPda(market: PublicKey): [PublicKey, number];
+export declare function noMintPda(market: PublicKey): [PublicKey, number];
+export declare function batchOrderPda(market: PublicKey, user: PublicKey): [PublicKey, number];
+export declare function resolutionPda(market: PublicKey): [PublicKey, number];
+export declare function oracleConfigPda(market: PublicKey): [PublicKey, number];
+export declare function oracleVotePda(market: PublicKey, oracle: PublicKey): [PublicKey, number];

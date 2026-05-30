@@ -14,11 +14,16 @@ import {
   oracleVotePda,
 } from "./pda";
 
-export type AegisProgram = Program<typeof IDL>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AegisProgram = Program<any>;
 
 export function getProgram(provider: AnchorProvider): AegisProgram {
-  return new Program(IDL, provider);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new Program(IDL as any, provider);
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const m = (p: AegisProgram): any => p.methods;
 
 // ── create_market ─────────────────────────────────────────────────
 
@@ -42,8 +47,8 @@ export async function buildCreateMarket(
   const [noMint] = noMintPda(market);
   const collateralVault = getAssociatedTokenAddressSync(params.collateralMint, market, true, tp);
 
-  return program.methods
-    .createMarket(
+  return m(program)
+    .create_market(
       Array.from(params.questionHash) as number[] & { length: 32 },
       params.bParam,
       params.batchWindowSlots,
@@ -83,8 +88,8 @@ export async function buildAddLiquidity(
   const collateralVault = getAssociatedTokenAddressSync(params.collateralMint, params.market, true, tp);
   const lpTokenAccount = getAssociatedTokenAddressSync(lpMint, params.lp, false, tp);
 
-  return program.methods
-    .addLiquidity(params.usdcAmount)
+  return m(program)
+    .add_liquidity(params.usdcAmount)
     .accounts({
       lp: params.lp,
       market: params.market,
@@ -118,8 +123,8 @@ export async function buildRemoveLiquidity(
   const lpTokenAccount = getAssociatedTokenAddressSync(lpMint, params.lp, false, tp);
   const lpCollateralAccount = getAssociatedTokenAddressSync(params.collateralMint, params.lp, false, tp);
 
-  return program.methods
-    .removeLiquidity(params.lpTokenAmount)
+  return m(program)
+    .remove_liquidity(params.lpTokenAmount)
     .accounts({
       lp: params.lp,
       market: params.market,
@@ -154,8 +159,8 @@ export async function buildSubmitOrder(
   const collateralVault = getAssociatedTokenAddressSync(params.collateralMint, params.market, true, tp);
   const hash = params.commitmentHash ? Array.from(params.commitmentHash) as number[] & { length: 32 } : null;
 
-  return program.methods
-    .submitOrder(params.outcome, params.amount, hash)
+  return m(program)
+    .submit_order(params.outcome, params.amount, hash)
     .accounts({
       user: params.user,
       market: params.market,
@@ -182,8 +187,8 @@ export async function buildRevealOrder(
 ): Promise<TransactionInstruction> {
   const [batchOrder] = batchOrderPda(params.market, params.user);
 
-  return program.methods
-    .revealOrder(params.outcome, params.amount, Array.from(params.nonce) as number[] & { length: 32 })
+  return m(program)
+    .reveal_order(params.outcome, params.amount, Array.from(params.nonce) as number[] & { length: 32 })
     .accounts({
       user: params.user,
       market: params.market,
@@ -213,8 +218,8 @@ export async function buildSettleBatch(
   const collateralVault = getAssociatedTokenAddressSync(params.collateralMint, params.market, true, tp);
   const crankerCollateralAccount = getAssociatedTokenAddressSync(params.collateralMint, params.cranker, false, tp);
 
-  return program.methods
-    .settleBatch()
+  return m(program)
+    .settle_batch()
     .accounts({
       cranker: params.cranker,
       market: params.market,
@@ -244,8 +249,8 @@ export async function buildProposeResolution(
 ): Promise<TransactionInstruction> {
   const [proposal] = resolutionPda(params.market);
 
-  return program.methods
-    .proposeResolution(params.proposedOutcome, params.bondAmount)
+  return m(program)
+    .propose_resolution(params.proposedOutcome, params.bondAmount)
     .accounts({
       proposer: params.proposer,
       market: params.market,
@@ -262,8 +267,8 @@ export async function buildFinalizeResolution(
 ): Promise<TransactionInstruction> {
   const [proposal] = resolutionPda(params.market);
 
-  return program.methods
-    .finalizeResolution()
+  return m(program)
+    .finalize_resolution()
     .accounts({ caller: params.caller, market: params.market, proposal })
     .instruction();
 }
@@ -276,8 +281,8 @@ export async function buildCheckPriceResolution(
 ): Promise<TransactionInstruction> {
   const [proposal] = resolutionPda(params.market);
 
-  return program.methods
-    .checkPriceResolution(params.bondAmount)
+  return m(program)
+    .check_price_resolution(params.bondAmount)
     .accounts({
       caller: params.caller,
       market: params.market,
@@ -304,8 +309,8 @@ export async function buildRedeemWinnings(
   const userWinningAccount = getAssociatedTokenAddressSync(params.winningMint, params.user, false, tp);
   const userCollateralAccount = getAssociatedTokenAddressSync(params.collateralMint, params.user, false, tp);
 
-  return program.methods
-    .redeemWinnings()
+  return m(program)
+    .redeem_winnings()
     .accounts({
       user: params.user,
       market: params.market,
@@ -328,8 +333,8 @@ export async function buildSubmitOracleVote(
   const [oracleConfig] = oracleConfigPda(params.market);
   const [oracleVote] = oracleVotePda(params.market, params.oracle);
 
-  return program.methods
-    .submitOracleVote(params.outcome, params.bondAmount)
+  return m(program)
+    .submit_oracle_vote(params.outcome, params.bondAmount)
     .accounts({
       oracle: params.oracle,
       market: params.market,
@@ -348,8 +353,8 @@ export async function buildTallyOracleVotes(
   const [oracleConfig] = oracleConfigPda(params.market);
   const [proposal] = resolutionPda(params.market);
 
-  return program.methods
-    .tallyOracleVotes(params.bondAmount)
+  return m(program)
+    .tally_oracle_votes(params.bondAmount)
     .accounts({
       caller: params.caller,
       market: params.market,
@@ -365,8 +370,8 @@ export async function buildPauseMarket(
   program: AegisProgram,
   params: { authority: PublicKey; market: PublicKey }
 ): Promise<TransactionInstruction> {
-  return program.methods
-    .pauseMarket()
+  return m(program)
+    .pause_market()
     .accounts({ authority: params.authority, market: params.market })
     .instruction();
 }
@@ -377,8 +382,8 @@ export async function buildUnpauseMarket(
   program: AegisProgram,
   params: { authority: PublicKey; market: PublicKey }
 ): Promise<TransactionInstruction> {
-  return program.methods
-    .unpauseMarket()
+  return m(program)
+    .unpause_market()
     .accounts({ authority: params.authority, market: params.market })
     .instruction();
 }

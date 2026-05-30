@@ -1,0 +1,12 @@
+import { PublicKey } from "@solana/web3.js";
+import { AegisProgram } from "./instructions";
+export declare function fetchMarket(program: AegisProgram, address: PublicKey): Promise<any>;
+export declare function fetchMarketBySeeds(program: AegisProgram, authority: PublicKey, questionHash: Uint8Array): Promise<any>;
+export declare function fetchAllMarkets(program: AegisProgram): Promise<any>;
+export declare function fetchLpPool(program: AegisProgram, market: PublicKey): Promise<any>;
+export declare function fetchBatchOrder(program: AegisProgram, market: PublicKey, user: PublicKey): Promise<any>;
+export declare function fetchBatchOrderByAddress(program: AegisProgram, address: PublicKey): Promise<any>;
+export declare function fetchOpenOrdersForMarket(program: AegisProgram, market: PublicKey): Promise<any>;
+export declare function fetchResolutionProposal(program: AegisProgram, market: PublicKey): Promise<any>;
+export declare function fetchOracleConfig(program: AegisProgram, market: PublicKey): Promise<any>;
+export declare function fetchOracleVote(program: AegisProgram, market: PublicKey, oracle: PublicKey): Promise<any>;
