@@ -75,8 +75,22 @@ pub struct SettleBatch<'info> {
     )]
     pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Cranker's USDC account — receives tip for settling the batch
+    #[account(
+    mut,
+    associated_token::mint = collateral_mint,
+    associated_token::authority = cranker,
+    associated_token::token_program = token_program,
+    )]
+    pub cranker_collateral_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
     /// Creator's USDC token account — receives creator fee
-    #[account(mut)]
+    /// Must match the vault registered at market creation
+    #[account(
+    mut,
+    constraint = creator_fee_account.key() == market.creator_fee_vault
+        @ AegisError::InvalidCreatorFeeAccount,
+    )]
     pub creator_fee_account: InterfaceAccount<'info, TokenAccount>,
 
     pub collateral_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -105,6 +119,10 @@ pub fn settle_batch<'info>(
         require!(
             market.status == MarketStatus::Active,
             AegisError::MarketNotActive
+        );
+        require!(
+            market.status != MarketStatus::Paused,
+            AegisError::MarketPaused
         );
     }
 
@@ -148,7 +166,13 @@ pub fn settle_batch<'info>(
             AegisError::StaleOrder
         );
         require!(!order.is_filled, AegisError::OrderAlreadyFilled);
-        require!(order.is_revealed, AegisError::OrderNotRevealed);
+        // ── Commit-reveal enforcement ─────────────────────────────────
+        // High-impact orders that used commit-reveal must be revealed
+        // before settle_batch. Unrevealed orders are dropped — the user
+        // forfeits their position for the batch (funds already in vault).
+        if order.is_commit_reveal {
+            require!(order.is_revealed, AegisError::OrderNotRevealed);
+        }
 
         match order.outcome {
             Outcome::Yes => {
@@ -337,6 +361,34 @@ pub fn settle_batch<'info>(
         )?;
     }
 
+    // ── Step 4b: Transfer crank tip ───────────────────────────────────
+    let crank_tip_bps = ctx.accounts.market.crank_tip_bps as u64;
+    if crank_tip_bps > 0 && total_fees > 0 {
+        let crank_tip = (total_fees as u128)
+            .checked_mul(crank_tip_bps as u128)
+            .ok_or(AegisError::Overflow)?
+            .checked_div(10_000)
+            .ok_or(AegisError::DivisionByZero)? as u64;
+
+        if crank_tip > 0 {
+            let tip_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.collateral_vault.to_account_info(),
+                    mint: ctx.accounts.collateral_mint.to_account_info(),
+                    to: ctx.accounts.cranker_collateral_account.to_account_info(),
+                    authority: ctx.accounts.market.to_account_info(),
+                },
+                signer_seeds,
+            );
+            token_interface::transfer_checked(
+                tip_ctx,
+                crank_tip,
+                ctx.accounts.collateral_mint.decimals,
+            )?;
+        }
+    }
+
     // ── Step 5: Mark orders as filled ────────────────────────────
     for i in 0..order_count {
         let order_info = &ctx.remaining_accounts[i * 2];
@@ -382,6 +434,15 @@ pub fn settle_batch<'info>(
         net_yes,
         net_no,
         matched,
+        crank_tip: if crank_tip_bps > 0 && total_fees > 0 {
+            (total_fees as u128)
+                .checked_mul(crank_tip_bps as u128)
+                .unwrap_or(0)
+                .checked_div(10_000)
+                .unwrap_or(0) as u64
+        } else {
+            0
+        },
         total_fees,
         orders_filled: order_data.len() as u8,
         new_batch_slot_start: clock.slot,
@@ -408,6 +469,7 @@ pub struct BatchSettled {
     pub net_yes: u64,
     pub net_no: u64,
     pub matched: u64,
+    pub crank_tip: u64, // ← new
     pub total_fees: u64,
     pub orders_filled: u8,
     pub new_batch_slot_start: u64,
