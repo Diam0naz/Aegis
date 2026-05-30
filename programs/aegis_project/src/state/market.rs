@@ -11,6 +11,7 @@ use anchor_lang::prelude::*;
 pub enum MarketStatus {
     Active,
     Locked,
+    Paused, // ← new
     Resolved,
 }
 
@@ -19,6 +20,15 @@ pub enum MarketStatus {
 pub enum Outcome {
     Yes,
     No,
+}
+
+impl Outcome {
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Outcome::Yes => 0,
+            Outcome::No => 1,
+        }
+    }
 }
 
 // ── Market ────────────────────────────────────────────────────────
@@ -110,31 +120,42 @@ pub struct Market {
     /// Creator fee in basis points (e.g. 50 = 0.5%)
     /// Taken from total fee before LP/protocol split
     pub creator_fee_bps: u16,
+
+    /// Max order size as a fraction of pool depth (e.g. 1000 = max 10%).
+    /// Zero means uncapped.
+    pub max_order_bps: u16,
+
+    /// Tip paid to the crank from protocol fees on each settle_batch (e.g. 5 = 0.05%).
+    /// Paid in USDC from the collateral vault.
+    pub crank_tip_bps: u16,
 }
 
 impl Market {
-    /// Space calculation:
-    /// 8        discriminator (Anchor adds automatically)
-    /// 32       authority
-    /// 32       question_hash
-    /// 8        b_param
-    /// 8        yes_qty
-    /// 8        no_qty
-    /// 8        batch_slot_start
-    /// 8        batch_window_slots
-    /// 1        batch_active
-    /// 2        fee_bps
-    /// 32       yes_mint
-    /// 32       no_mint
-    /// 32       collateral_vault
-    /// 8        resolution_slot
-    /// 1+1      status (enum discriminant)
-    /// 1+1+1    winning_outcome (Option<enum>)
-    /// 1        bump
-    /// 8        total_fees_collected
-    /// + 64     padding (future fields — never skip this)
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 1 + 2 + 32 + 32 + 32 + 8 + 2 + 2 + 1 + 8
-    + 32 + 8 + 4 + 1  // pyth fields
-    + 32 + 2           // creator_fee_vault + creator_fee_bps
-    + 17; // remaining padding (was 19, now 17 after -2 for u16 wait already counted, adjust accordingly)
+    pub const LEN: usize = 8    // discriminator
+        + 32   // authority
+        + 32   // question_hash
+        + 8    // b_param
+        + 8    // yes_qty
+        + 8    // no_qty
+        + 8    // batch_slot_start
+        + 8    // batch_window_slots
+        + 1    // batch_active
+        + 2    // fee_bps
+        + 32   // yes_mint
+        + 32   // no_mint
+        + 32   // collateral_vault
+        + 8    // resolution_slot
+        + 1    // status (enum)
+        + 1 + 1 // winning_outcome (Option<enum>)
+        + 1    // bump
+        + 8    // total_fees_collected
+        + 32   // price_feed
+        + 8    // strike_price
+        + 4    // strike_exponent
+        + 1    // price_above_strike_resolves_yes
+        + 32   // creator_fee_vault
+        + 2    // creator_fee_bps
+        + 2    // max_order_bps
+        + 2    // crank_tip_bps
+        + 32; // padding
 }
