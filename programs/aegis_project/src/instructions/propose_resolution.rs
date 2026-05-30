@@ -6,7 +6,7 @@ use crate::{
 
 // ── Constants ─────────────────────────────────────────────────────────────
 /// Default challenge window: ~2 days at 400ms/slot  (432,000 slots)
-const DEFAULT_CHALLENGE_WINDOW: u64 = 432_000;
+const DEFAULT_CHALLENGE_WINDOW: u64 = 5; // localnet: 5 slots
 
 /// Minimum bond a proposer must post with the proposal (0.001 SOL)
 const MIN_BOND_LAMPORTS: u64 = 1_000_000;

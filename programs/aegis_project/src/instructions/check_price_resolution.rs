@@ -114,7 +114,7 @@ pub fn check_price_resolution(ctx: Context<CheckPriceResolution>, bond_amount: u
     proposal.proposed_outcome = yes_wins;
     proposal.bond_amount = bond_amount;
     proposal.proposed_at_slot = clock.slot;
-    proposal.challenge_window = 432_000; // 48h
+    proposal.challenge_window = 5; // localnet: 5 slots
     proposal.is_disputed = false;
     proposal.is_finalized = false;
     proposal.bump = ctx.bumps.proposal;
