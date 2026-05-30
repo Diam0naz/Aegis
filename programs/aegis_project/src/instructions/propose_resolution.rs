@@ -98,7 +98,23 @@ pub fn propose_resolution(
         AegisError::AlreadyResolved
     );
 
-    // ── Guard 3: bond meets minimum ───────────────────────────────
+
+    // ── Guard 3: market must not be paused ────────────────────
+    require!(
+    market.status != MarketStatus::Paused,
+    AegisError::MarketPaused
+    );
+    
+    // ── Guard 4: market must be locked or active past resolution slot ──
+    // Locked is the normal path (set by settle_batch near resolution).
+    // Active is also accepted here because guard 1 already confirmed the
+    // resolution slot has passed — the market is effectively closed.
+    require!(
+        market.status == MarketStatus::Locked || market.status == MarketStatus::Active,
+        AegisError::MarketNotLocked
+    );
+
+    // ── Guard 5: bond meets minimum ───────────────────────────────
     require!(
         bond_amount >= MIN_BOND_LAMPORTS,
         AegisError::BondTooLow

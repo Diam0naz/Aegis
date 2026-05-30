@@ -80,6 +80,10 @@ pub struct CreateMarket<'info> {
     )]
     pub collateral_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
+    /// Authority's USDC token account — receives creator fees
+    #[account(mut)]
+    pub creator_fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -136,7 +140,7 @@ pub fn create_market(
     market.winning_outcome = None;
     market.bump = ctx.bumps.market;
     market.total_fees_collected = 0;
-    market.creator_fee_vault = ctx.accounts.authority.key();
+    market.creator_fee_vault = ctx.accounts.creator_fee_vault.key();
     market.creator_fee_bps = creator_fee_bps;
 
     // ── Emit event for off-chain indexing ─────────────────────────

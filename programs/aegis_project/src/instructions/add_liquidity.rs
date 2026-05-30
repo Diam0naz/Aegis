@@ -97,6 +97,10 @@ pub fn add_liquidity(ctx: Context<AddLiquidity>, usdc_amount: u64) -> Result<()>
         ctx.accounts.market.status == MarketStatus::Active,
         AegisError::MarketNotActive
     );
+    require!(
+        ctx.accounts.market.status != MarketStatus::Paused,
+        AegisError::MarketPaused
+    );
     require!(usdc_amount >= MIN_LIQUIDITY, AegisError::OrderBelowMinimum);
 
     // ── Calculate LP tokens to mint ───────────────────────────────
@@ -110,8 +114,14 @@ pub fn add_liquidity(ctx: Context<AddLiquidity>, usdc_amount: u64) -> Result<()>
 
     let lp_pool: &Box<Account<'_, LpPool>> = &ctx.accounts.lp_pool;
     if lp_pool.total_lp_supply > 0 {
-        require!(lp_pool.market == ctx.accounts.market.key(), AegisError::Unauthorized);
-        require!(lp_pool.lp_mint == ctx.accounts.lp_mint.key(), AegisError::Unauthorized);
+        require!(
+            lp_pool.market == ctx.accounts.market.key(),
+            AegisError::Unauthorized
+        );
+        require!(
+            lp_pool.lp_mint == ctx.accounts.lp_mint.key(),
+            AegisError::Unauthorized
+        );
     }
 
     let lp_tokens_to_mint: u64 = if lp_pool.total_lp_supply == 0 {
