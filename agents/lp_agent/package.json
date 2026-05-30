@@ -1,0 +1,21 @@
+{
+  "name": "aegis-lp-agent",
+  "version": "0.1.0",
+  "description": "LP Management Agent — monitors PDL, pool depth, and LP risk metrics across Aegis prediction markets",
+  "scripts": {
+    "start": "npx ts-node src/index.ts",
+    "build": "tsc"
+  },
+  "type": "module",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/spl-token": "^0.4.0",
+    "@solana/web3.js": "^1.95.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}
