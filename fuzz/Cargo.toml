@@ -1,0 +1,25 @@
+[package]
+name = "aegis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "lmsr_pricing"
+path = "fuzz_targets/lmsr_pricing.rs"
+test = false
+doc = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+aegis_project = { path = "../programs/aegis_project" }
+borsh = "0.10.3"
+borsh-derive = "0.10.3"
+
+[profile.release]
+debug = true
+
+[workspace]
