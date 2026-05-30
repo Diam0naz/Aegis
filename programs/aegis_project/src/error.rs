@@ -34,6 +34,18 @@ pub enum AegisError {
     #[msg("winning outcome is not set")]
     MissingWinningOutcome,
 
+    #[msg("market must be locked before resolution can be proposed")]
+    MarketNotLocked,
+
+    #[msg("market is paused by authority")]
+    MarketPaused,
+
+    #[msg("market is not paused")]
+    MarketNotPaused,
+
+    #[msg("market is already paused")]
+    MarketAlreadyPaused,
+
     // Orders
     #[msg("order amount is below the minimum (1 USDC)")]
     OrderBelowMinimum,
@@ -62,6 +74,24 @@ pub enum AegisError {
     #[msg("order is not yet revealed")]
     OrderNotRevealed,
 
+    #[msg("oracle bond amount is below the required minimum")]
+    OracleBondTooLow,
+
+    #[msg("order exceeds maximum allowed size for this market")]
+    OrderExceedsMaxSize,
+
+    #[msg("order is not a commit-reveal order")]
+    NotACommitRevealOrder,
+
+    #[msg("order has already been revealed")]
+    OrderAlreadyRevealed,
+
+    #[msg("reveal does not match the original commitment hash")]
+    InvalidReveal,
+
+    #[msg("high-impact order requires a commitment hash")]
+    CommitmentHashRequired, 
+
     // Math
     #[msg("arithmetic overflow")]
     Overflow,
@@ -82,6 +112,9 @@ pub enum AegisError {
 
     #[msg("invalid outcome mint for this operation")]
     InvalidOutcomeMint,
+
+    #[msg("creator fee account does not match market.creator_fee_vault")]
+    InvalidCreatorFeeAccount,
 
     // Liquidity & Redemption
     #[msg("invalid liquidity amount")]
