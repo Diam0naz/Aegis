@@ -235,6 +235,7 @@ describe("aegis_project", () => {
 
   // ── Token accounts ─────────────────────────────────────────────
   let lpUsdcAccount: PublicKey;
+  let authorityUsdcAccount: PublicKey;
   let trader1UsdcAccount: PublicKey;
   let trader2UsdcAccount: PublicKey;
   let proposerUsdcAccount: PublicKey;
@@ -263,6 +264,12 @@ describe("aegis_project", () => {
     );
 
     // Create USDC token accounts for all parties
+    authorityUsdcAccount = await createAssociatedTokenAccount(
+      connection,
+      authority,
+      usdcMint,
+      authority.publicKey,
+    );
     lpUsdcAccount = await createAssociatedTokenAccount(
       connection,
       lpUser,
@@ -283,7 +290,7 @@ describe("aegis_project", () => {
     );
     proposerUsdcAccount = await createAssociatedTokenAccount(
       connection,
-      proposer,
+        proposer,
       usdcMint,
       proposer.publicKey,
     );
@@ -354,6 +361,7 @@ describe("aegis_project", () => {
           new BN(8), // batch_window_slots
           new BN(resolutionSlot),
           200, // fee_bps (2%)
+          50,  // creator_fee_bps (0.5%)
         )
         .accounts({
           authority: authority.publicKey,
@@ -362,6 +370,7 @@ describe("aegis_project", () => {
           yesMint: yesMintPDA,
           noMint: noMintPDA,
           collateralVault: collateralVault,
+          creatorFeeVault: authorityUsdcAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -423,6 +432,7 @@ describe("aegis_project", () => {
             new BN(8),
             new BN(slot + 10_000),
             200,
+            50,
           )
           .accounts({
             authority: authority.publicKey,
@@ -431,6 +441,7 @@ describe("aegis_project", () => {
             yesMint: badYesMint,
             noMint: badNoMint,
             collateralVault: badVault,
+            creatorFeeVault: authorityUsdcAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -468,6 +479,7 @@ describe("aegis_project", () => {
             new BN(8),
             new BN(slot + 10_000),
             1500,
+            50,
           )
           .accounts({
             authority: authority.publicKey,
@@ -476,6 +488,7 @@ describe("aegis_project", () => {
             yesMint: badYesMint,
             noMint: badNoMint,
             collateralVault: badVault,
+            creatorFeeVault: authorityUsdcAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -559,18 +572,12 @@ describe("aegis_project", () => {
     });
 
     it("second LP deposit gets proportional LP tokens", async () => {
-      // Mint USDC to authority so they can also LP
-      const authorityUsdc = await createAssociatedTokenAccount(
-        connection,
-        authority,
-        usdcMint,
-        authority.publicKey,
-      );
+      // authorityUsdcAccount was created in before() hook
       await mintTo(
         connection,
         authority,
         usdcMint,
-        authorityUsdc,
+        authorityUsdcAccount,
         authority,
         2_000_000_000,
       );
@@ -590,7 +597,7 @@ describe("aegis_project", () => {
           market: marketPDA,
           lpPool: lpPoolPDA,
           lpMint: lpMintPDA,
-          lpCollateralAccount: authorityUsdc,
+          lpCollateralAccount: authorityUsdcAccount,
           collateralVault: collateralVault,
           lpTokenAccount: authorityLpAccount,
           collateralMint: usdcMint,
@@ -649,7 +656,7 @@ describe("aegis_project", () => {
       ).amount;
 
       await program.methods
-        .submitOrder({ yes: {} }, amount)
+        .submitOrder({ yes: {} }, amount, null)
         .accounts({
           user: trader1.publicKey,
           market: marketPDA,
@@ -707,7 +714,7 @@ describe("aegis_project", () => {
       const amount = new BN(80_000_000); // 80 USDC
 
       await program.methods
-        .submitOrder({ no: {} }, amount)
+        .submitOrder({ no: {} }, amount, null)
         .accounts({
           user: trader2.publicKey,
           market: marketPDA,
@@ -756,7 +763,7 @@ describe("aegis_project", () => {
 
       try {
         await program.methods
-          .submitOrder({ yes: {} }, new BN(100))
+          .submitOrder({ yes: {} }, new BN(100), null)
           .accounts({
             user: tinyTrader.publicKey,
             market: marketPDA,
@@ -839,11 +846,14 @@ describe("aegis_project", () => {
           await program.methods
             .settleBatch()
             .accounts({
+              cranker: authority.publicKey,
               market: marketPDA,
               lpPool: lpPoolPDA,
               yesMint: yesMintPDA,
               noMint: noMintPDA,
               collateralVault: collateralVault,
+              crankerCollateralAccount: getAssociatedTokenAddressSync(usdcMint, authority.publicKey, false),
+              creatorFeeAccount: getAssociatedTokenAddressSync(usdcMint, authority.publicKey, false),
               collateralMint: usdcMint,
               tokenProgram: TOKEN_PROGRAM_ID,
               associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -890,6 +900,8 @@ describe("aegis_project", () => {
           yesMint: yesMintPDA,
           noMint: noMintPDA,
           collateralVault: collateralVault,
+          crankerCollateralAccount: getAssociatedTokenAddressSync(usdcMint, authority.publicKey, false),
+          creatorFeeAccount: getAssociatedTokenAddressSync(usdcMint, authority.publicKey, false),
           collateralMint: usdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -1034,6 +1046,7 @@ describe("aegis_project", () => {
           new BN(1),
           new BN(nearResolutionSlot),
           100,
+          25,
         )
         .accounts({
           authority: authority.publicKey,
@@ -1042,6 +1055,7 @@ describe("aegis_project", () => {
           yesMint: nearYesMint,
           noMint: nearNoMint,
           collateralVault: nearVault,
+          creatorFeeVault: authorityUsdcAccount,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -1204,6 +1218,7 @@ describe("aegis_project", () => {
 
     // Token accounts
     let e2eLpUsdc: PublicKey;
+    let e2eAuthorityUsdc: PublicKey;
     let e2eYesBuyerUsdc: PublicKey;
     let e2eNoBuyerUsdc: PublicKey;
     let e2eProposerUsdc: PublicKey;
@@ -1232,6 +1247,12 @@ describe("aegis_project", () => {
       );
 
       // Create and fund token accounts
+      e2eAuthorityUsdc = await createAssociatedTokenAccount(
+        connection,
+        e2eAuthority,
+        e2eUsdcMint,
+        e2eAuthority.publicKey,
+      );
       e2eLpUsdc = await createAssociatedTokenAccount(
         connection,
         e2eLp,
@@ -1338,6 +1359,7 @@ describe("aegis_project", () => {
           new BN(4), // batch_window_slots (short for testing)
           new BN(resolutionSlot),
           200, // fee_bps 2%
+          50,  // creator_fee_bps 0.5%
         )
         .accounts({
           authority: e2eAuthority.publicKey,
@@ -1346,6 +1368,7 @@ describe("aegis_project", () => {
           yesMint: e2eYesMint,
           noMint: e2eNoMint,
           collateralVault: e2eVault,
+          creatorFeeVault: e2eAuthorityUsdc,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -1403,7 +1426,7 @@ describe("aegis_project", () => {
 
       // YES buyer bets 200 USDC
       await program.methods
-        .submitOrder({ yes: {} }, new BN(200_000_000))
+        .submitOrder({ yes: {} }, new BN(200_000_000), null)
         .accounts({
           user: e2eYesBuyer.publicKey,
           market: e2eMarketPDA,
@@ -1420,7 +1443,7 @@ describe("aegis_project", () => {
 
       // NO buyer bets 150 USDC
       await program.methods
-        .submitOrder({ no: {} }, new BN(150_000_000))
+        .submitOrder({ no: {} }, new BN(150_000_000), null)
         .accounts({
           user: e2eNoBuyer.publicKey,
           market: e2eMarketPDA,
@@ -1478,6 +1501,8 @@ describe("aegis_project", () => {
           yesMint: e2eYesMint,
           noMint: e2eNoMint,
           collateralVault: e2eVault,
+          crankerCollateralAccount: getAssociatedTokenAddressSync(e2eUsdcMint, e2eAuthority.publicKey, false),
+          creatorFeeAccount: getAssociatedTokenAddressSync(e2eUsdcMint, e2eAuthority.publicKey, false),
           collateralMint: e2eUsdcMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,

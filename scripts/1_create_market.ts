@@ -17,7 +17,7 @@ import {
 } from "./setup";
 
 // ── Market Config ─────────────────────────────────────────────────
-const QUESTION    = "Will SOL hit $500 by end of 2022?";
+const QUESTION    = "Will SOL hit $200 by end of 2022?";
 const B_PARAM     = 500;
 const BATCH_SLOTS = 8;
 const FEE_BPS     = 200;

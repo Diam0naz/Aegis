@@ -80,11 +80,29 @@ Add `PauseMarket` instruction gated to `market.authority`. Sets a new
 `redeem_winnings` reject on `Paused` status. Allows authority to freeze a market
 if a bug is discovered post-launch without trapping user funds.
 
-### 2.5 LMSR overflow audit
+### 2.5 Replace linear LMSR approximation with proper fixed-point exp
+**File:** `submit_order.rs` (`lmsr_yes_price_bps`)
+
+The current implementation uses a linear ratio (`yes / (yes + no)`) which diverges
+from true LMSR pricing as quantities grow relative to `b_param`. Under true LMSR,
+`P(YES) = exp(yes/b) / (exp(yes/b) + exp(no/b))`. The linear approximation
+underprices extreme positions, meaning LPs are undercompensated when the market
+is heavily skewed.
+
+Replace with a fixed-point softmax using a lookup table or Taylor series for `exp`:
+```rust
+// exp(x) ≈ 1 + x + x²/2 + x³/6  for |x| < 2
+// For larger x, use range reduction: exp(x) = exp(x - k*ln2) * 2^k
+```
+Must remain `no_std` compatible (no `f64`). Validate against reference values at
+`b=100`, `b=1000`, `b=10000` across the full quantity range before replacing.
+
+### 2.6 LMSR overflow audit
 Formally verify `lmsr_yes_price_bps` at boundary values:
 - `b_param = 100` (minimum), large quantities
 - `yes_qty` or `no_qty` approaching `u64::MAX`
 Add fuzz tests using `cargo fuzz` targeting the pricing function specifically.
+Run this after 2.5 so the fuzz target covers the real implementation.
 
 **Deliverable:** Economic attack vectors closed. Fuzz test suite added.
 
@@ -146,17 +164,54 @@ Arcium mainnet availability.
 ## Phase 5 — Umbra-style Privacy Routing
 *Reduce metadata leakage for traders.*
 
-### 5.1 Stealth order submission
+### 5.2 Stealth order submission
 Integrate stealth address generation for order submission. Traders generate a
 one-time address per order — breaks linkability between orders from the same wallet.
 
-### 5.2 Intent separation
+### 5.1 Implement `reveal_order` instruction and enforce commit-reveal in settle_batch
+
+The `BatchOrder` account already carries `commitment_hash`, `is_commit_reveal`, and
+`is_revealed` fields, and `submit_order` flags orders with `impact > COMMIT_REVEAL_THRESHOLD_BPS`
+(currently 200 bps). However, the `reveal_order` instruction does not exist yet, and
+`settle_batch` does not reject unrevealed high-impact orders — the protection is
+declared but not enforced.
+
+**Step 1 — `reveal_order` instruction:**
+```rust
+// Verify hash(outcome || amount || nonce) == order.commitment_hash
+let hash = anchor_lang::solana_program::hash::hashv(&[
+    &[outcome as u8], amount.to_le_bytes().as_ref(), nonce.as_ref()
+]);
+require!(hash.to_bytes() == order.commitment_hash, AegisError::InvalidReveal);
+order.is_revealed = true;
+order.outcome = outcome;
+order.amount_in = amount;
+```
+
+**Step 2 — enforce in `settle_batch`:**
+```rust
+if order.is_commit_reveal {
+    require!(order.is_revealed, AegisError::OrderNotRevealed);
+}
+```
+
+**Step 3 — enforce in `submit_order` for high-impact orders:**
+```rust
+if impact > COMMIT_REVEAL_THRESHOLD_BPS {
+    order.is_commit_reveal = true;
+    order.is_revealed = false;
+    order.commitment_hash = commitment_hash; // passed as param
+    // do NOT write outcome/amount yet — written at reveal time
+}
+```
+
+### 5.3 Intent separation
 Separate order intent (what you want) from order execution (what goes on-chain).
 Orders are committed as hashed intents, revealed at batch settlement. This is
 already partially implemented via the batch model — extend it with full
 commit-reveal using Pedersen commitments.
 
-### 5.3 Metadata hardening
+### 5.4 Metadata hardening
 Document and mitigate known deanonymization vectors:
 - Timing correlation (orders submitted close together from same IP)
 - Amount fingerprinting (round numbers are identifiable)
@@ -255,10 +310,12 @@ Before audit, write invariant tests covering:
 | Crank incentivization | High | Medium | 2 |
 | Oracle slashing | High | High | 2 |
 | Emergency pause | Medium | Low | 2 |
-| LMSR overflow audit | High | Medium | 2 |
+| Replace linear LMSR with fixed-point exp | High | Medium | 2 |
+| LMSR overflow / fuzz audit | High | Medium | 2 |
 | BAM sequencing plugin | High | High | 3 |
 | Arcium oracle votes | Medium | Very High | 4 |
-| Commit-reveal orders | Medium | Medium | 5 |
+| reveal_order + settle_batch enforcement | High | Medium | 5 |
+| Commit-reveal (Pedersen / stealth) | Medium | Medium | 5 |
 | Optimistic UI (Alpenglow) | High | Medium | 6 |
 | Subgraph frontend | High | Medium | 6 |
 | Wallet adapter | High | Low | 6 |
