@@ -2,25 +2,35 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { BatchCountdownChip } from "@/components/BatchCountdown";
+import { truncatePubkey } from "@/lib/utils";
 
 export default function Navbar() {
-  const [connected, setConnected] = useState(false);
+  const { publicKey, disconnect, connected } = useWallet();
+  const { setVisible } = useWalletModal();
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+
+  const handleWalletClick = () => {
+    if (connected) {
+      disconnect();
+    } else {
+      setVisible(true);
+    }
+  };
 
   return (
     <>
       <header className="navbar">
         <div className="navbar-inner">
           <div className="navbar-left">
-            {/* Logo */}
             <Link href="/" className="navbar-logo">
               <span className="logo-icon" aria-hidden="true">⬡</span>
               <span className="logo-text">Aegis</span>
               <span className="logo-badge">Protocol</span>
             </Link>
 
-            {/* Navigation links */}
             <nav className="navbar-nav" aria-label="Main navigation" style={{ marginLeft: "12px" }}>
               <Link href="/" className="nav-link">Home</Link>
               <Link href="/markets" className="nav-link">Markets</Link>
@@ -32,10 +42,9 @@ export default function Navbar() {
             </nav>
           </div>
 
-          {/* Right actions */}
           <div className="navbar-actions">
             <BatchCountdownChip />
-            
+
             <div className="network-pill" title="Connected to Aegis Devnet">
               <span className="network-dot" />
               Devnet
@@ -44,13 +53,13 @@ export default function Navbar() {
             <button
               id="connect-wallet-btn"
               className={`connect-btn ${connected ? "connected" : ""}`}
-              onClick={() => setConnected((v) => !v)}
+              onClick={handleWalletClick}
               aria-label={connected ? "Disconnect wallet" : "Connect wallet"}
             >
-              {connected ? (
+              {connected && publicKey ? (
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span className="connect-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--yes)" }} />
-                  <span className="font-mono">7x9F…j5H</span>
+                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--yes)", display: "inline-block" }} />
+                  <span className="font-mono">{truncatePubkey(publicKey.toBase58())}</span>
                 </div>
               ) : (
                 "CONNECT WALLET"
@@ -60,18 +69,12 @@ export default function Navbar() {
         </div>
       </header>
 
-      {/* How it Works Modal */}
       {showHowItWorks && (
         <div
           style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(0,0,0,0.8)",
-            backdropFilter: "blur(4px)",
+            position: "fixed", inset: 0, zIndex: 999,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)",
           }}
           onClick={() => setShowHowItWorks(false)}
         >
@@ -79,11 +82,8 @@ export default function Navbar() {
             style={{
               background: "var(--surface)",
               border: "1px solid var(--border-amber)",
-              borderRadius: "12px",
-              padding: "24px",
-              maxWidth: "500px",
-              width: "90%",
-              boxShadow: "0 0 30px rgba(245,158,11,0.15)",
+              borderRadius: "12px", padding: "24px",
+              maxWidth: "500px", width: "90%",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -97,23 +97,19 @@ export default function Navbar() {
             </div>
             <div className="font-mono" style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13px", lineHeight: "1.6", color: "var(--text-muted)" }}>
               <p>
-                <strong style={{ color: "#fff" }}>1. Place Batch Orders:</strong> Instead of instant execution, Aegis pools all YES and NO swap orders during a 5-minute settlement interval.
+                <strong style={{ color: "#fff" }}>1. Place Batch Orders:</strong> Instead of instant execution, Aegis pools all YES and NO swap orders during a settlement window.
               </p>
               <p>
-                <strong style={{ color: "#fff" }}>2. Liquidity & LMSR:</strong> Aegis aggregates all bids and asks. Price changes are calculated mathematically using the logarithmic market scoring rule (LMSR) based on the net imbalance.
+                <strong style={{ color: "#fff" }}>2. LMSR Pricing:</strong> Prices are calculated using the Logarithmic Market Scoring Rule — a mathematically bounded formula that guarantees liquidity at all prices.
               </p>
               <p>
-                <strong style={{ color: "#fff" }}>3. Batch Settlement:</strong> Every 5 minutes, the batch is cleared at a single, fair clearing price. This mitigates front-running, high-frequency trading, and gas wars.
+                <strong style={{ color: "#fff" }}>3. Batch Settlement:</strong> Every window, the crank agent clears all orders at a single fair price. This eliminates front-running and MEV attacks.
               </p>
               <p>
-                <strong style={{ color: "#fff" }}>4. Zero slippage:</strong> Trades settle atomically. All orders within a batch share the exact same clearing rate.
+                <strong style={{ color: "#fff" }}>4. Oracle Resolution:</strong> After the resolution slot, bonded oracles vote on the outcome. Winners redeem outcome tokens 1:1 for USDC.
               </p>
             </div>
-            <button
-              onClick={() => setShowHowItWorks(false)}
-              className="place-order-btn"
-              style={{ marginTop: "20px" }}
-            >
+            <button onClick={() => setShowHowItWorks(false)} className="place-order-btn" style={{ marginTop: "20px" }}>
               GOT IT
             </button>
           </div>

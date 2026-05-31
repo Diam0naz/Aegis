@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { MockMarket } from "@/lib/mockData";
-import { formatUsdc } from "@/lib/utils";
+import { formatDollar } from "@/lib/utils";
 import Sparkline from "@/components/Sparkline";
 import { BatchCountdownChip } from "@/components/BatchCountdown";
 
@@ -75,7 +75,7 @@ export default function MarketCard({ market, variant = "polymarket" }: MarketCar
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", borderTop: "1px solid var(--border)", paddingTop: "10px", marginTop: "auto" }}>
           <span className="font-mono" style={{ color: "var(--text-muted)" }}>
-            Vol: ${formatUsdc(market.volume)}
+            Vol: ${formatDollar(market.volume)}
           </span>
           <span style={{ color: "var(--text-subtle)", fontWeight: "600" }}>
             Ends {market.resolutionDate}
@@ -154,7 +154,7 @@ export default function MarketCard({ market, variant = "polymarket" }: MarketCar
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10px", marginTop: "12px", color: "var(--text-muted)" }}>
-          <span className="font-mono">Vol: ${formatUsdc(market.volume)}</span>
+          <span className="font-mono">Vol: ${formatDollar(market.volume)}</span>
           <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span className="batch-countdown-pulse" style={{ width: "4px", height: "4px" }} />
             Batch settled
@@ -289,7 +289,7 @@ export default function MarketCard({ market, variant = "polymarket" }: MarketCar
         }}
       >
         <span className="font-mono" style={{ color: "var(--text-muted)" }}>
-          Volume: ${formatUsdc(market.volume)}
+          Volume: ${formatDollar(market.volume)}
         </span>
         <span style={{ color: "var(--text-subtle)", fontWeight: "600" }}>
           Resolves {market.resolutionDate}

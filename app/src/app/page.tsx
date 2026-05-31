@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import MarketCard from "@/components/MarketCard";
 import { MOCK_MARKETS, MockMarket } from "@/lib/mockData";
-import { formatUsdc } from "@/lib/utils";
+import { formatDollar } from "@/lib/utils";
 import MultiLineChart from "@/components/MultiLineChart";
 
 const CATEGORIES = [
@@ -105,12 +105,12 @@ export default function HomePage() {
               </div>
 
               {/* Multi-line Interactive Chart */}
-              <div style={{ background: "rgba(0,0,0,0.2)", padding: "16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.03)" }}>
+              <div style={{ background: "#0d0d11", padding: "16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.04)" }}>
                 <MultiLineChart outcomes={featuredMarket.outcomes || []} />
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "16px", color: "var(--text-muted)" }}>
-                <span className="font-mono">Liquidity: ${formatUsdc(featuredMarket.liquidity)} USDC</span>
+                <span className="font-mono">Liquidity: ${formatDollar(featuredMarket.liquidity)} USDC</span>
                 <span>Oracle Resolver: {featuredMarket.resolutionSource}</span>
               </div>
             </div>

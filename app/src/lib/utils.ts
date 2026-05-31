@@ -25,6 +25,14 @@ export function formatCompact(n: number): string {
   return n.toString();
 }
 
+/** Format a plain dollar amount (already in USD, not micro-units) with K/M suffix */
+export function formatDollar(n: number | BN): string {
+  const num = BN.isBN(n) ? n.toNumber() : n;
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + "M";
+  if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
+  return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // ── Slot / time conversion ────────────────────────────────────────
 
 const SLOT_DURATION_MS = 400; // Solana target: 400ms per slot

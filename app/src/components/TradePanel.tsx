@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { MockMarket } from "@/lib/mockData";
-import { formatUsdc } from "@/lib/utils";
+import { formatDollar } from "@/lib/utils";
 
 interface Props {
   market: MockMarket;
@@ -183,7 +183,7 @@ export default function TradePanel({ market }: Props) {
           <div className="lp-stats">
             <div className="lp-stat">
               <span className="lp-stat-label">Pool Liquidity</span>
-              <span className="lp-stat-value">{formatUsdc(market.liquidity)}</span>
+              <span className="lp-stat-value">{formatDollar(market.liquidity)}</span>
             </div>
             <div className="lp-stat">
               <span className="lp-stat-label">b Parameter</span>
